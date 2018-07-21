@@ -39,15 +39,8 @@ var (
 	baseURL = "https://min-api.cryptocompare.com/data"
 )
 
-// Histoday https://min-api.cryptocompare.com
-func Histoday(fsym string, tsym string, limit int, e string) *Historical {
-	var params []string
-	params = append(params, fmt.Sprintf("fsym=%s", fsym))
-	params = append(params, fmt.Sprintf("tsym=%s", tsym))
-	params = append(params, fmt.Sprintf("limit=%v", limit))
-	params = append(params, fmt.Sprintf("e=%s", e))
-
-	url := fmt.Sprintf("%s/histoday?%s", baseURL, strings.Join(params, "&"))
+func query(q string, params []string) []byte {
+	url := fmt.Sprintf("%s/%s?%s", baseURL, q, strings.Join(params, "&"))
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -60,9 +53,25 @@ func Histoday(fsym string, tsym string, limit int, e string) *Historical {
 		log.Fatal(err)
 	}
 
+	return body
+}
+
+// Histoday https://min-api.cryptocompare.com
+func Histoday(fsym string, tsym string, limit int, e string) *Historical {
+	var params []string
+	params = append(params, fmt.Sprintf("fsym=%s", fsym))
+	params = append(params, fmt.Sprintf("tsym=%s", tsym))
+	params = append(params, fmt.Sprintf("limit=%v", limit))
+	params = append(params, fmt.Sprintf("e=%s", e))
+
+	body := query("histoday", params)
+
 	jsonData := &Historical{}
 
-	err = json.Unmarshal([]byte(body), &jsonData)
+	err := json.Unmarshal([]byte(body), &jsonData)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return jsonData
 }
