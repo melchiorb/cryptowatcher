@@ -56,6 +56,16 @@ func query(q string, params []string) []byte {
 	return body
 }
 
+// Close gets the close price from Data returned by the API
+func Close(data []Tick) []float64 {
+	result := []float64{}
+	for i := range data {
+		result = append(result, data[i].Close)
+	}
+
+	return result
+}
+
 // Histoday https://min-api.cryptocompare.com
 func Histoday(fsym string, tsym string, limit int, e string) *Historical {
 	var params []string
@@ -65,6 +75,26 @@ func Histoday(fsym string, tsym string, limit int, e string) *Historical {
 	params = append(params, fmt.Sprintf("e=%s", e))
 
 	body := query("histoday", params)
+
+	jsonData := &Historical{}
+
+	err := json.Unmarshal([]byte(body), &jsonData)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return jsonData
+}
+
+// Histohour https://min-api.cryptocompare.com
+func Histohour(fsym string, tsym string, limit int, e string) *Historical {
+	var params []string
+	params = append(params, fmt.Sprintf("fsym=%s", fsym))
+	params = append(params, fmt.Sprintf("tsym=%s", tsym))
+	params = append(params, fmt.Sprintf("limit=%v", limit))
+	params = append(params, fmt.Sprintf("e=%s", e))
+
+	body := query("histohour", params)
 
 	jsonData := &Historical{}
 
