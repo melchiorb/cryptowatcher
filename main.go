@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
+	"time"
 
 	cc "./cryptocompare"
 
@@ -43,6 +43,12 @@ var config struct {
 	Verbose bool    `json:"verbose"`
 }
 
+type notification struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Source    string `json:"source"`
+}
+
 type params map[string]interface{}
 
 var (
@@ -63,44 +69,41 @@ func setGlobal(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
 }
 
-func runAlert(L *lua.LState, P params, alert alert) {
+func runAlert(L *lua.LState, P params, alert alert) (bool, notification) {
+	fired := false
+
+	var n notification
+	n.Timestamp = time.Now().Format(time.RFC850)
+	n.Message = alert.Name
+	n.Source = alert.Code
+
 	switch alert.Type {
 	case "lua":
-		runAlertLua(L, alert)
+		err := L.DoString(alert.Code)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if luaResult {
+			fired = true
+			luaResult = false
+		}
 	case "calc":
-		runAlertCalc(P, alert)
+		exp, err := govaluate.NewEvaluableExpression(alert.Code)
+		res, err := exp.Evaluate(P)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if res == true {
+			fired = true
+		}
 	default:
 	}
-}
 
-func runAlertLua(L *lua.LState, alert alert) {
-	err := L.DoString(alert.Code)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if luaResult {
-		notify(alert, "Lua")
-		luaResult = false
-	}
-}
-
-func runAlertCalc(P params, alert alert) {
-	exp, err := govaluate.NewEvaluableExpression(alert.Code)
-	res, err := exp.Evaluate(P)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if res == true {
-		notify(alert, "Calc")
-	}
-}
-
-func notify(alert alert, source string) {
-	fmt.Printf("%s (%s)\n", alert.Name, source)
+	return fired, n
 }
 
 func setIndicatorResult(src []float64, cName string, idcName string, L *lua.LState, Lg *lua.LState, P params, Pg params) {
@@ -123,7 +126,9 @@ func loadConfig(file string) {
 	}
 }
 
-func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params) {
+func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params) []notification {
+	var notifications []notification
+
 	for i := range config.Checks {
 		c := config.Checks[i]
 		result[c.Name] = make(map[string][]float64)
@@ -223,20 +228,30 @@ func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params)
 		}
 
 		for j := range c.Alerts {
-			runAlert(L, P, c.Alerts[j])
+			fired, n := runAlert(L, P, c.Alerts[j])
+
+			if fired {
+				notifications = append(notifications, n)
+			}
 		}
 	}
 
 	for j := range config.Alerts {
-		runAlert(Lg, Pg, config.Alerts[j])
+		fired, n := runAlert(Lg, Pg, config.Alerts[j])
+
+		if fired {
+			notifications = append(notifications, n)
+		}
 	}
+
+	return notifications
 }
 
 func main() {
 	if len(os.Args) >= 2 {
 		loadConfig(os.Args[1])
 	} else {
-		loadConfig("cryptowatch.json")
+		loadConfig("config.json")
 	}
 
 	result := make(map[string]map[string][]float64)
@@ -250,10 +265,15 @@ func main() {
 	setGlobal(Lg, "alert", luaAlertCallback)
 	setGlobal(Lg, "length", config.Length)
 
-	mainLoop(result, Lg, Pg)
+	notifications := mainLoop(result, Lg, Pg)
 
 	if config.Verbose {
+		output := make(map[string]interface{})
+
+		output["data"] = result
+		output["alerts"] = notifications
+
 		enc := json.NewEncoder(os.Stdout)
-		enc.Encode(result)
+		enc.Encode(output)
 	}
 }
