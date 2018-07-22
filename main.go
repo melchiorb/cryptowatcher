@@ -36,6 +36,7 @@ type check struct {
 
 var config struct {
 	Checks  []check `json:"checks"`
+	Alerts  []alert `json:"alerts"`
 	Scope   string  `json:"scope"`
 	Length  int     `json:"length"`
 	Verbose bool    `json:"verbose"`
@@ -55,6 +56,10 @@ func reverse(numbers []float64) {
 	}
 }
 
+func setGlobal(L *lua.LState, name string, value interface{}) {
+	L.SetGlobal(name, luar.New(L, value))
+}
+
 func main() {
 	result := make(map[string]map[string][]float64)
 
@@ -70,6 +75,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	Pg := make(map[string]interface{}, 64)
+	Pg["length"] = config.Length
+
+	Lg := lua.NewState()
+	defer Lg.Close()
+
+	setGlobal(Lg, "alert", luaAlert)
+	setGlobal(Lg, "length", config.Length)
 
 	for i := range config.Checks {
 		c := config.Checks[i]
@@ -99,23 +113,46 @@ func main() {
 		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		params := make(map[string]interface{}, 64)
-		params["coin"] = c.Coin
-		params["currency"] = c.Currency
-		params["length"] = config.Length
-		params["open"] = open[0]
-		params["high"] = high[0]
-		params["low"] = low[0]
-		params["close"] = close[0]
+		Pg[c.Name+"_coin"] = c.Coin
+		Pg[c.Name+"_currency"] = c.Currency
+
+		Pg[c.Name+"_open"] = open[0]
+		Pg[c.Name+"_high"] = high[0]
+		Pg[c.Name+"_low"] = low[0]
+		Pg[c.Name+"_close"] = close[0]
+
+		P := make(map[string]interface{}, 64)
+
+		P["coin"] = c.Coin
+		P["currency"] = c.Currency
+		P["length"] = config.Length
+
+		P["open"] = open[0]
+		P["high"] = high[0]
+		P["low"] = low[0]
+		P["close"] = close[0]
+
+		setGlobal(Lg, c.Name+"_coin", c.Coin)
+		setGlobal(Lg, c.Name+"_currency", c.Currency)
+
+		setGlobal(Lg, c.Name+"_open", open)
+		setGlobal(Lg, c.Name+"_high", high)
+		setGlobal(Lg, c.Name+"_low", low)
+		setGlobal(Lg, c.Name+"_close", close)
 
 		L := lua.NewState()
 		defer L.Close()
 
-		L.SetGlobal("alert", luar.New(L, luaAlert))
-		L.SetGlobal("open", luar.New(L, open))
-		L.SetGlobal("high", luar.New(L, high))
-		L.SetGlobal("low", luar.New(L, low))
-		L.SetGlobal("close", luar.New(L, close))
+		setGlobal(L, "alert", luaAlert)
+
+		setGlobal(L, "coin", c.Coin)
+		setGlobal(L, "currency", c.Currency)
+		setGlobal(L, "length", config.Length)
+
+		setGlobal(L, "open", open)
+		setGlobal(L, "high", high)
+		setGlobal(L, "low", low)
+		setGlobal(L, "close", close)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
@@ -127,24 +164,30 @@ func main() {
 
 				result[c.Name][idc.Name] = rsi
 
-				params[idc.Name] = rsi[0]
-				L.SetGlobal(idc.Name, luar.New(L, rsi))
+				Pg[c.Name+"_"+idc.Name] = rsi[0]
+				P[idc.Name] = rsi[0]
+				setGlobal(Lg, c.Name+"_"+idc.Name, rsi)
+				setGlobal(L, idc.Name, rsi)
 			case "ema":
 				ema := talib.Ema(src, idc.Params[0])
 				reverse(ema)
 
 				result[c.Name][idc.Name] = ema
 
-				params[idc.Name] = ema[0]
-				L.SetGlobal(idc.Name, luar.New(L, ema))
+				Pg[c.Name+"_"+idc.Name] = ema[0]
+				P[idc.Name] = ema[0]
+				setGlobal(Lg, c.Name+"_"+idc.Name, ema)
+				setGlobal(L, idc.Name, ema)
 			case "macd":
 				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
 				reverse(hist)
 
 				result[c.Name][idc.Name] = hist
 
-				params[idc.Name] = hist[0]
-				L.SetGlobal(idc.Name, luar.New(L, hist))
+				Pg[c.Name+"_"+idc.Name] = hist[0]
+				P[idc.Name] = hist[0]
+				setGlobal(Lg, c.Name+"_"+idc.Name, hist)
+				setGlobal(L, idc.Name, hist)
 			default:
 			}
 		}
@@ -166,7 +209,7 @@ func main() {
 				}
 			case "calc":
 				exp, err := govaluate.NewEvaluableExpression(alert.Code)
-				res, err := exp.Evaluate(params)
+				res, err := exp.Evaluate(P)
 
 				if err != nil {
 					log.Fatal(err)
@@ -182,6 +225,36 @@ func main() {
 		if config.Verbose {
 			enc := json.NewEncoder(os.Stdout)
 			enc.Encode(result)
+		}
+	}
+
+	for j := range config.Alerts {
+		alert := config.Alerts[j]
+
+		switch alert.Type {
+		case "lua":
+			err = Lg.DoString(alert.Code)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if luaResult {
+				fmt.Printf("%s (Lua)\n", alert.Name)
+				luaResult = false
+			}
+		case "calc":
+			exp, err := govaluate.NewEvaluableExpression(alert.Code)
+			res, err := exp.Evaluate(Pg)
+
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if res == true {
+				fmt.Printf("%s (Calc)\n", alert.Name)
+			}
+		default:
 		}
 	}
 }
