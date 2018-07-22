@@ -7,6 +7,7 @@ import (
 	"os"
 
 	cc "./cryptocompare"
+
 	"github.com/Knetic/govaluate"
 	talib "github.com/markcheno/go-talib"
 	lua "github.com/yuin/gopher-lua"
@@ -122,24 +123,7 @@ func loadConfig(file string) {
 	}
 }
 
-func main() {
-	if len(os.Args) >= 2 {
-		loadConfig(os.Args[1])
-	} else {
-		loadConfig("cryptowatch.json")
-	}
-
-	result := make(map[string]map[string][]float64)
-
-	Pg := make(params, 64)
-	Pg["length"] = config.Length
-
-	Lg := lua.NewState()
-	defer Lg.Close()
-
-	setGlobal(Lg, "alert", luaAlertCallback)
-	setGlobal(Lg, "length", config.Length)
-
+func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params) {
 	for i := range config.Checks {
 		c := config.Checks[i]
 		result[c.Name] = make(map[string][]float64)
@@ -246,6 +230,27 @@ func main() {
 	for j := range config.Alerts {
 		runAlert(Lg, Pg, config.Alerts[j])
 	}
+}
+
+func main() {
+	if len(os.Args) >= 2 {
+		loadConfig(os.Args[1])
+	} else {
+		loadConfig("cryptowatch.json")
+	}
+
+	result := make(map[string]map[string][]float64)
+
+	Pg := make(params, 64)
+	Pg["length"] = config.Length
+
+	Lg := lua.NewState()
+	defer Lg.Close()
+
+	setGlobal(Lg, "alert", luaAlertCallback)
+	setGlobal(Lg, "length", config.Length)
+
+	mainLoop(result, Lg, Pg)
 
 	if config.Verbose {
 		enc := json.NewEncoder(os.Stdout)
