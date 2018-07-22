@@ -42,6 +42,8 @@ var config struct {
 	Verbose bool    `json:"verbose"`
 }
 
+type params map[string]interface{}
+
 var (
 	luaResult = false
 )
@@ -60,7 +62,7 @@ func setGlobal(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
 }
 
-func runAlert(L *lua.LState, P map[string]interface{}, alert alert) {
+func runAlert(L *lua.LState, P params, alert alert) {
 	switch alert.Type {
 	case "lua":
 		runAlertLua(L, alert)
@@ -83,7 +85,7 @@ func runAlertLua(L *lua.LState, alert alert) {
 	}
 }
 
-func runAlertCalc(P map[string]interface{}, alert alert) {
+func runAlertCalc(P params, alert alert) {
 	exp, err := govaluate.NewEvaluableExpression(alert.Code)
 	res, err := exp.Evaluate(P)
 
@@ -98,6 +100,13 @@ func runAlertCalc(P map[string]interface{}, alert alert) {
 
 func notify(alert alert, source string) {
 	fmt.Printf("%s (%s)\n", alert.Name, source)
+}
+
+func setIndicatorResult(src []float64, cName string, idcName string, L *lua.LState, Lg *lua.LState, P params, Pg params) {
+	Pg[cName+"_"+idcName] = src[0]
+	P[idcName] = src[0]
+	setGlobal(Lg, cName+"_"+idcName, src)
+	setGlobal(L, idcName, src)
 }
 
 func loadConfig(file string) {
@@ -122,7 +131,7 @@ func main() {
 
 	result := make(map[string]map[string][]float64)
 
-	Pg := make(map[string]interface{}, 64)
+	Pg := make(params, 64)
 	Pg["length"] = config.Length
 
 	Lg := lua.NewState()
@@ -167,7 +176,7 @@ func main() {
 		Pg[c.Name+"_low"] = low[0]
 		Pg[c.Name+"_close"] = close[0]
 
-		P := make(map[string]interface{}, 64)
+		P := make(params, 64)
 
 		P["coin"] = c.Coin
 		P["currency"] = c.Currency
@@ -208,32 +217,23 @@ func main() {
 				rsi := talib.Rsi(src, idc.Params[0])
 				reverse(rsi)
 
-				result[c.Name][idc.Name] = rsi
+				setIndicatorResult(rsi, c.Name, idc.Name, L, Lg, P, Pg)
 
-				Pg[c.Name+"_"+idc.Name] = rsi[0]
-				P[idc.Name] = rsi[0]
-				setGlobal(Lg, c.Name+"_"+idc.Name, rsi)
-				setGlobal(L, idc.Name, rsi)
+				result[c.Name][idc.Name] = rsi
 			case "ema":
 				ema := talib.Ema(src, idc.Params[0])
 				reverse(ema)
 
-				result[c.Name][idc.Name] = ema
+				setIndicatorResult(ema, c.Name, idc.Name, L, Lg, P, Pg)
 
-				Pg[c.Name+"_"+idc.Name] = ema[0]
-				P[idc.Name] = ema[0]
-				setGlobal(Lg, c.Name+"_"+idc.Name, ema)
-				setGlobal(L, idc.Name, ema)
+				result[c.Name][idc.Name] = ema
 			case "macd":
 				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
 				reverse(hist)
 
-				result[c.Name][idc.Name] = hist
+				setIndicatorResult(hist, c.Name, idc.Name, L, Lg, P, Pg)
 
-				Pg[c.Name+"_"+idc.Name] = hist[0]
-				P[idc.Name] = hist[0]
-				setGlobal(Lg, c.Name+"_"+idc.Name, hist)
-				setGlobal(L, idc.Name, hist)
+				result[c.Name][idc.Name] = hist
 			default:
 			}
 		}
