@@ -72,7 +72,7 @@ func exprState(P params, name string, value interface{}) {
 	P[name] = value
 }
 
-func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, notification) {
+func runAlert(state scriptState, alert alert) (bool, notification) {
 	fired := false
 
 	var n notification
@@ -84,9 +84,9 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 
 	switch alert.Type {
 	case "lua":
-		luaState(L, "alert", func(v bool) { luaResult = v })
+		luaState(state.lua, "alert", func(v bool) { luaResult = v })
 
-		err := L.DoString(alert.Code)
+		err := state.lua.DoString(alert.Code)
 
 		if err != nil {
 			log.Fatal(err)
@@ -98,7 +98,7 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 		}
 	case "expr":
 		exp, err := govaluate.NewEvaluableExpression(alert.Code)
-		res, err := exp.Evaluate(P)
+		res, err := exp.Evaluate(state.expr)
 
 		if err != nil {
 			log.Fatal(err)
@@ -113,11 +113,12 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 	return fired, n
 }
 
-func setIndicatorResult(src []float64, cName string, idcName string, L *lua.LState, Lg *lua.LState, P params, Pg params) {
-	Pg[cName+"_"+idcName] = src[0]
-	P[idcName] = src[0]
-	luaState(Lg, cName+"_"+idcName, src)
-	luaState(L, idcName, src)
+func setIndicatorResult(src []float64, cName string, idcName string, localState scriptState, globalState scriptState) {
+	exprState(globalState.expr, cName+"_"+idcName, src[0])
+	exprState(localState.expr, idcName, src[0])
+
+	luaState(globalState.lua, cName+"_"+idcName, src)
+	luaState(localState.lua, idcName, src)
 }
 
 func loadConfig(file string) {
@@ -139,11 +140,11 @@ func mainLoop(globalState scriptState) (results, []notification) {
 	globalState.lua = lua.NewState()
 	defer globalState.lua.Close()
 
-	Pg := globalState.expr
-	Lg := globalState.lua
+	gExpr := globalState.expr
+	gLua := globalState.lua
 
-	exprState(Pg, "length", config.Length)
-	luaState(Lg, "length", config.Length)
+	exprState(gExpr, "length", config.Length)
+	luaState(gLua, "length", config.Length)
 
 	result := make(results)
 	var notifications []notification
@@ -161,8 +162,8 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		localState.lua = lua.NewState()
 		defer localState.lua.Close()
 
-		P := localState.expr
-		L := localState.lua
+		lExpr := localState.expr
+		lLua := localState.lua
 
 		if config.Scope == "hour" {
 			data = cc.Histohour(c.Coin, c.Currency, config.Length, c.Exchange).Data
@@ -186,39 +187,39 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		exprState(Pg, c.Name+"_coin", c.Coin)
-		exprState(Pg, c.Name+"_currency", c.Currency)
+		exprState(gExpr, c.Name+"_coin", c.Coin)
+		exprState(gExpr, c.Name+"_currency", c.Currency)
 
-		exprState(Pg, c.Name+"_open", open[0])
-		exprState(Pg, c.Name+"_high", high[0])
-		exprState(Pg, c.Name+"_low", low[0])
-		exprState(Pg, c.Name+"_close", close[0])
+		exprState(gExpr, c.Name+"_open", open[0])
+		exprState(gExpr, c.Name+"_high", high[0])
+		exprState(gExpr, c.Name+"_low", low[0])
+		exprState(gExpr, c.Name+"_close", close[0])
 
-		exprState(P, "coin", c.Coin)
-		exprState(P, "currency", c.Currency)
-		exprState(P, "length", config.Length)
+		exprState(lExpr, "coin", c.Coin)
+		exprState(lExpr, "currency", c.Currency)
+		exprState(lExpr, "length", config.Length)
 
-		exprState(P, "open", open[0])
-		exprState(P, "high", high[0])
-		exprState(P, "low", low[0])
-		exprState(P, "close", close[0])
+		exprState(lExpr, "open", open[0])
+		exprState(lExpr, "high", high[0])
+		exprState(lExpr, "low", low[0])
+		exprState(lExpr, "close", close[0])
 
-		luaState(Lg, c.Name+"_coin", c.Coin)
-		luaState(Lg, c.Name+"_currency", c.Currency)
+		luaState(gLua, c.Name+"_coin", c.Coin)
+		luaState(gLua, c.Name+"_currency", c.Currency)
 
-		luaState(Lg, c.Name+"_open", open)
-		luaState(Lg, c.Name+"_high", high)
-		luaState(Lg, c.Name+"_low", low)
-		luaState(Lg, c.Name+"_close", close)
+		luaState(gLua, c.Name+"_open", open)
+		luaState(gLua, c.Name+"_high", high)
+		luaState(gLua, c.Name+"_low", low)
+		luaState(gLua, c.Name+"_close", close)
 
-		luaState(L, "coin", c.Coin)
-		luaState(L, "currency", c.Currency)
-		luaState(L, "length", config.Length)
+		luaState(lLua, "coin", c.Coin)
+		luaState(lLua, "currency", c.Currency)
+		luaState(lLua, "length", config.Length)
 
-		luaState(L, "open", open)
-		luaState(L, "high", high)
-		luaState(L, "low", low)
-		luaState(L, "close", close)
+		luaState(lLua, "open", open)
+		luaState(lLua, "high", high)
+		luaState(lLua, "low", low)
+		luaState(lLua, "close", close)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
@@ -228,21 +229,21 @@ func mainLoop(globalState scriptState) (results, []notification) {
 				rsi := talib.Rsi(src, idc.Params[0])
 				reverse(rsi)
 
-				setIndicatorResult(rsi, c.Name, idc.Name, L, Lg, P, Pg)
+				setIndicatorResult(rsi, c.Name, idc.Name, localState, globalState)
 
 				result[c.Name][idc.Name] = rsi
 			case "ema":
 				ema := talib.Ema(src, idc.Params[0])
 				reverse(ema)
 
-				setIndicatorResult(ema, c.Name, idc.Name, L, Lg, P, Pg)
+				setIndicatorResult(ema, c.Name, idc.Name, localState, globalState)
 
 				result[c.Name][idc.Name] = ema
 			case "macd":
 				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
 				reverse(hist)
 
-				setIndicatorResult(hist, c.Name, idc.Name, L, Lg, P, Pg)
+				setIndicatorResult(hist, c.Name, idc.Name, localState, globalState)
 
 				result[c.Name][idc.Name] = hist
 			default:
@@ -250,7 +251,7 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		}
 
 		for j := range c.Alerts {
-			fired, n := runAlert(localState, L, P, c.Alerts[j])
+			fired, n := runAlert(localState, c.Alerts[j])
 
 			if fired {
 				notifications = append(notifications, n)
@@ -259,7 +260,7 @@ func mainLoop(globalState scriptState) (results, []notification) {
 	}
 
 	for j := range config.Alerts {
-		fired, n := runAlert(globalState, Lg, Pg, config.Alerts[j])
+		fired, n := runAlert(globalState, config.Alerts[j])
 
 		if fired {
 			notifications = append(notifications, n)
