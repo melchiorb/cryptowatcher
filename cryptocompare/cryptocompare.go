@@ -36,7 +36,8 @@ type Historical struct {
 }
 
 var (
-	baseURL = "https://min-api.cryptocompare.com/data"
+	baseURL    = "https://min-api.cryptocompare.com/data"
+	Aggregated = "CCCAGG"
 )
 
 func query(q string, params []string) []byte {

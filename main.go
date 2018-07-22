@@ -9,6 +9,8 @@ import (
 	cc "./cryptocompare"
 	"github.com/Knetic/govaluate"
 	talib "github.com/markcheno/go-talib"
+	lua "github.com/yuin/gopher-lua"
+	luar "layeh.com/gopher-luar"
 )
 
 type indicator struct {
@@ -33,13 +35,24 @@ type check struct {
 }
 
 var config struct {
-	Checks []check `json:"checks"`
-	Scope  string  `json:"scope"`
-	Length int     `json:"length"`
+	Checks  []check `json:"checks"`
+	Scope   string  `json:"scope"`
+	Length  int     `json:"length"`
+	Verbose bool    `json:"verbose"`
 }
 
-func last(ary []float64) float64 {
-	return ary[len(ary)-1]
+var (
+	luaResult = false
+)
+
+func luaAlert(value bool) {
+	luaResult = value
+}
+
+func reverse(numbers []float64) {
+	for i, j := 0, len(numbers)-1; i < j; i, j = i+1, j-1 {
+		numbers[i], numbers[j] = numbers[j], numbers[i]
+	}
 }
 
 func main() {
@@ -63,7 +76,10 @@ func main() {
 		result[c.Name] = make(map[string][]float64)
 
 		data := cc.Histoday(c.Coin, c.Currency, config.Length, c.Exchange).Data
+		src := cc.Close(data)
+
 		close := cc.Close(data)
+		reverse(close)
 
 		result[c.Name]["close"] = close
 
@@ -71,24 +87,42 @@ func main() {
 		params["coin"] = c.Coin
 		params["currency"] = c.Currency
 		params["length"] = config.Length
-		params["close"] = last(close)
+		params["close"] = close[0]
+
+		L := lua.NewState()
+		defer L.Close()
+
+		L.SetGlobal("alert", luar.New(L, luaAlert))
+		L.SetGlobal("close", luar.New(L, close))
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
 
 			switch idc.Type {
 			case "rsi":
-				rsi := talib.Rsi(close, idc.Params[0])
+				rsi := talib.Rsi(src, idc.Params[0])
+				reverse(rsi)
+
 				result[c.Name][idc.Name] = rsi
-				params[idc.Name] = last(rsi)
+
+				params[idc.Name] = rsi[0]
+				L.SetGlobal(idc.Name, luar.New(L, rsi))
 			case "ema":
-				ema := talib.Ema(close, idc.Params[0])
+				ema := talib.Ema(src, idc.Params[0])
+				reverse(ema)
+
 				result[c.Name][idc.Name] = ema
-				params[idc.Name] = last(ema)
+
+				params[idc.Name] = ema[0]
+				L.SetGlobal(idc.Name, luar.New(L, ema))
 			case "macd":
-				_, _, hist := talib.Macd(close, idc.Params[0], idc.Params[1], idc.Params[2])
+				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
+				reverse(hist)
+
 				result[c.Name][idc.Name] = hist
-				params[idc.Name] = last(hist)
+
+				params[idc.Name] = hist[0]
+				L.SetGlobal(idc.Name, luar.New(L, hist))
 			default:
 			}
 		}
@@ -97,6 +131,17 @@ func main() {
 			alert := c.Alerts[j]
 
 			switch alert.Type {
+			case "lua":
+				err = L.DoString(alert.Code)
+
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				if luaResult {
+					fmt.Println(alert.Name)
+					luaResult = false
+				}
 			case "calc":
 				exp, err := govaluate.NewEvaluableExpression(alert.Code)
 				res, err := exp.Evaluate(params)
@@ -111,8 +156,10 @@ func main() {
 			default:
 			}
 		}
-	}
 
-	enc := json.NewEncoder(os.Stdout)
-	enc.Encode(result)
+		if config.Verbose {
+			enc := json.NewEncoder(os.Stdout)
+			enc.Encode(result)
+		}
+	}
 }
