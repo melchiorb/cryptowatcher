@@ -35,14 +35,6 @@ type check struct {
 	Alerts     []alert     `json:"alerts"`
 }
 
-var config struct {
-	Checks  []check `json:"checks"`
-	Alerts  []alert `json:"alerts"`
-	Scope   string  `json:"scope"`
-	Length  int     `json:"length"`
-	Verbose bool    `json:"verbose"`
-}
-
 type notification struct {
 	Timestamp string `json:"timestamp"`
 	Message   string `json:"message"`
@@ -51,12 +43,19 @@ type notification struct {
 
 type params map[string]interface{}
 
-var (
-	luaResult = false
-)
+type results map[string]map[string][]float64
 
-func luaAlertCallback(value bool) {
-	luaResult = value
+type scriptState struct {
+	calc map[string]interface{}
+	lua  *lua.LState
+}
+
+var config struct {
+	Checks  []check `json:"checks"`
+	Alerts  []alert `json:"alerts"`
+	Scope   string  `json:"scope"`
+	Length  int     `json:"length"`
+	Verbose bool    `json:"verbose"`
 }
 
 func reverse(numbers []float64) {
@@ -69,7 +68,7 @@ func setGlobal(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
 }
 
-func runAlert(L *lua.LState, P params, alert alert) (bool, notification) {
+func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, notification) {
 	fired := false
 
 	var n notification
@@ -77,8 +76,12 @@ func runAlert(L *lua.LState, P params, alert alert) (bool, notification) {
 	n.Message = alert.Name
 	n.Source = alert.Code
 
+	luaResult := false
+
 	switch alert.Type {
 	case "lua":
+		setGlobal(L, "alert", func(v bool) { luaResult = v })
+
 		err := L.DoString(alert.Code)
 
 		if err != nil {
@@ -126,7 +129,19 @@ func loadConfig(file string) {
 	}
 }
 
-func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params) []notification {
+func mainLoop(state scriptState) (results, []notification) {
+	state.calc = make(params, 64)
+	state.calc["length"] = config.Length
+
+	state.lua = lua.NewState()
+	defer state.lua.Close()
+
+	setGlobal(state.lua, "length", config.Length)
+
+	Lg := state.lua
+	Pg := state.calc
+
+	result := make(results)
 	var notifications []notification
 
 	for i := range config.Checks {
@@ -187,8 +202,6 @@ func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params)
 		L := lua.NewState()
 		defer L.Close()
 
-		setGlobal(L, "alert", luaAlertCallback)
-
 		setGlobal(L, "coin", c.Coin)
 		setGlobal(L, "currency", c.Currency)
 		setGlobal(L, "length", config.Length)
@@ -228,7 +241,7 @@ func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params)
 		}
 
 		for j := range c.Alerts {
-			fired, n := runAlert(L, P, c.Alerts[j])
+			fired, n := runAlert(state, L, P, c.Alerts[j])
 
 			if fired {
 				notifications = append(notifications, n)
@@ -237,14 +250,14 @@ func mainLoop(result map[string]map[string][]float64, Lg *lua.LState, Pg params)
 	}
 
 	for j := range config.Alerts {
-		fired, n := runAlert(Lg, Pg, config.Alerts[j])
+		fired, n := runAlert(state, Lg, Pg, config.Alerts[j])
 
 		if fired {
 			notifications = append(notifications, n)
 		}
 	}
 
-	return notifications
+	return result, notifications
 }
 
 func main() {
@@ -254,26 +267,17 @@ func main() {
 		loadConfig("config.json")
 	}
 
-	result := make(map[string]map[string][]float64)
+	var state scriptState
 
-	Pg := make(params, 64)
-	Pg["length"] = config.Length
+	result, notifications := mainLoop(state)
 
-	Lg := lua.NewState()
-	defer Lg.Close()
-
-	setGlobal(Lg, "alert", luaAlertCallback)
-	setGlobal(Lg, "length", config.Length)
-
-	notifications := mainLoop(result, Lg, Pg)
+	output := make(map[string]interface{})
+	output["alerts"] = notifications
 
 	if config.Verbose {
-		output := make(map[string]interface{})
-
 		output["data"] = result
-		output["alerts"] = notifications
-
-		enc := json.NewEncoder(os.Stdout)
-		enc.Encode(output)
 	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.Encode(output)
 }
