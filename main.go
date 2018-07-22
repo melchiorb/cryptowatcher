@@ -64,8 +64,12 @@ func reverse(numbers []float64) {
 	}
 }
 
-func setGlobal(L *lua.LState, name string, value interface{}) {
+func setLua(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
+}
+
+func setCalc(P params, name string, value interface{}) {
+	P[name] = value
 }
 
 func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, notification) {
@@ -80,7 +84,7 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 
 	switch alert.Type {
 	case "lua":
-		setGlobal(L, "alert", func(v bool) { luaResult = v })
+		setLua(L, "alert", func(v bool) { luaResult = v })
 
 		err := L.DoString(alert.Code)
 
@@ -112,8 +116,8 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 func setIndicatorResult(src []float64, cName string, idcName string, L *lua.LState, Lg *lua.LState, P params, Pg params) {
 	Pg[cName+"_"+idcName] = src[0]
 	P[idcName] = src[0]
-	setGlobal(Lg, cName+"_"+idcName, src)
-	setGlobal(L, idcName, src)
+	setLua(Lg, cName+"_"+idcName, src)
+	setLua(L, idcName, src)
 }
 
 func loadConfig(file string) {
@@ -129,26 +133,36 @@ func loadConfig(file string) {
 	}
 }
 
-func mainLoop(state scriptState) (results, []notification) {
-	state.calc = make(params, 64)
-	state.calc["length"] = config.Length
+func mainLoop(globalState scriptState) (results, []notification) {
+	globalState.calc = make(params, 64)
 
-	state.lua = lua.NewState()
-	defer state.lua.Close()
+	globalState.lua = lua.NewState()
+	defer globalState.lua.Close()
 
-	setGlobal(state.lua, "length", config.Length)
+	Pg := globalState.calc
+	Lg := globalState.lua
 
-	Lg := state.lua
-	Pg := state.calc
+	setCalc(Pg, "length", config.Length)
+	setLua(Lg, "length", config.Length)
 
 	result := make(results)
 	var notifications []notification
 
 	for i := range config.Checks {
 		c := config.Checks[i]
-		result[c.Name] = make(map[string][]float64)
 
+		result[c.Name] = make(map[string][]float64)
 		var data []cc.Tick
+
+		var localState scriptState
+
+		localState.calc = make(params, 64)
+
+		localState.lua = lua.NewState()
+		defer localState.lua.Close()
+
+		P := localState.calc
+		L := localState.lua
 
 		if config.Scope == "hour" {
 			data = cc.Histohour(c.Coin, c.Currency, config.Length, c.Exchange).Data
@@ -172,44 +186,39 @@ func mainLoop(state scriptState) (results, []notification) {
 		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		Pg[c.Name+"_coin"] = c.Coin
-		Pg[c.Name+"_currency"] = c.Currency
+		setCalc(Pg, c.Name+"_coin", c.Coin)
+		setCalc(Pg, c.Name+"_currency", c.Currency)
 
-		Pg[c.Name+"_open"] = open[0]
-		Pg[c.Name+"_high"] = high[0]
-		Pg[c.Name+"_low"] = low[0]
-		Pg[c.Name+"_close"] = close[0]
+		setCalc(Pg, c.Name+"_open", open[0])
+		setCalc(Pg, c.Name+"_high", high[0])
+		setCalc(Pg, c.Name+"_low", low[0])
+		setCalc(Pg, c.Name+"_close", close[0])
 
-		P := make(params, 64)
+		setCalc(P, "coin", c.Coin)
+		setCalc(P, "currency", c.Currency)
+		setCalc(P, "length", config.Length)
 
-		P["coin"] = c.Coin
-		P["currency"] = c.Currency
-		P["length"] = config.Length
+		setCalc(P, "open", open[0])
+		setCalc(P, "high", high[0])
+		setCalc(P, "low", low[0])
+		setCalc(P, "close", close[0])
 
-		P["open"] = open[0]
-		P["high"] = high[0]
-		P["low"] = low[0]
-		P["close"] = close[0]
+		setLua(Lg, c.Name+"_coin", c.Coin)
+		setLua(Lg, c.Name+"_currency", c.Currency)
 
-		setGlobal(Lg, c.Name+"_coin", c.Coin)
-		setGlobal(Lg, c.Name+"_currency", c.Currency)
+		setLua(Lg, c.Name+"_open", open)
+		setLua(Lg, c.Name+"_high", high)
+		setLua(Lg, c.Name+"_low", low)
+		setLua(Lg, c.Name+"_close", close)
 
-		setGlobal(Lg, c.Name+"_open", open)
-		setGlobal(Lg, c.Name+"_high", high)
-		setGlobal(Lg, c.Name+"_low", low)
-		setGlobal(Lg, c.Name+"_close", close)
+		setLua(L, "coin", c.Coin)
+		setLua(L, "currency", c.Currency)
+		setLua(L, "length", config.Length)
 
-		L := lua.NewState()
-		defer L.Close()
-
-		setGlobal(L, "coin", c.Coin)
-		setGlobal(L, "currency", c.Currency)
-		setGlobal(L, "length", config.Length)
-
-		setGlobal(L, "open", open)
-		setGlobal(L, "high", high)
-		setGlobal(L, "low", low)
-		setGlobal(L, "close", close)
+		setLua(L, "open", open)
+		setLua(L, "high", high)
+		setLua(L, "low", low)
+		setLua(L, "close", close)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
@@ -241,7 +250,7 @@ func mainLoop(state scriptState) (results, []notification) {
 		}
 
 		for j := range c.Alerts {
-			fired, n := runAlert(state, L, P, c.Alerts[j])
+			fired, n := runAlert(localState, L, P, c.Alerts[j])
 
 			if fired {
 				notifications = append(notifications, n)
@@ -250,7 +259,7 @@ func mainLoop(state scriptState) (results, []notification) {
 	}
 
 	for j := range config.Alerts {
-		fired, n := runAlert(state, Lg, Pg, config.Alerts[j])
+		fired, n := runAlert(globalState, Lg, Pg, config.Alerts[j])
 
 		if fired {
 			notifications = append(notifications, n)
