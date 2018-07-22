@@ -46,7 +46,7 @@ var (
 	luaResult = false
 )
 
-func luaAlert(value bool) {
+func luaAlertCallback(value bool) {
 	luaResult = value
 }
 
@@ -60,11 +60,47 @@ func setGlobal(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
 }
 
-func main() {
-	result := make(map[string]map[string][]float64)
+func runAlert(L *lua.LState, P map[string]interface{}, alert alert) {
+	switch alert.Type {
+	case "lua":
+		runAlertLua(L, alert)
+	case "calc":
+		runAlertCalc(P, alert)
+	default:
+	}
+}
 
-	file := os.Args[1]
+func runAlertLua(L *lua.LState, alert alert) {
+	err := L.DoString(alert.Code)
 
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if luaResult {
+		notify(alert, "Lua")
+		luaResult = false
+	}
+}
+
+func runAlertCalc(P map[string]interface{}, alert alert) {
+	exp, err := govaluate.NewEvaluableExpression(alert.Code)
+	res, err := exp.Evaluate(P)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if res == true {
+		notify(alert, "Calc")
+	}
+}
+
+func notify(alert alert, source string) {
+	fmt.Printf("%s (%s)\n", alert.Name, source)
+}
+
+func loadConfig(file string) {
 	configFile, err := os.Open(file)
 	if err != nil {
 		log.Fatal(err)
@@ -75,6 +111,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func main() {
+	if len(os.Args) >= 2 {
+		loadConfig(os.Args[1])
+	} else {
+		loadConfig("cryptowatch.json")
+	}
+
+	result := make(map[string]map[string][]float64)
 
 	Pg := make(map[string]interface{}, 64)
 	Pg["length"] = config.Length
@@ -82,7 +128,7 @@ func main() {
 	Lg := lua.NewState()
 	defer Lg.Close()
 
-	setGlobal(Lg, "alert", luaAlert)
+	setGlobal(Lg, "alert", luaAlertCallback)
 	setGlobal(Lg, "length", config.Length)
 
 	for i := range config.Checks {
@@ -143,7 +189,7 @@ func main() {
 		L := lua.NewState()
 		defer L.Close()
 
-		setGlobal(L, "alert", luaAlert)
+		setGlobal(L, "alert", luaAlertCallback)
 
 		setGlobal(L, "coin", c.Coin)
 		setGlobal(L, "currency", c.Currency)
@@ -193,68 +239,16 @@ func main() {
 		}
 
 		for j := range c.Alerts {
-			alert := c.Alerts[j]
-
-			switch alert.Type {
-			case "lua":
-				err = L.DoString(alert.Code)
-
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				if luaResult {
-					fmt.Printf("%s: %s (Lua)\n", c.Name, alert.Name)
-					luaResult = false
-				}
-			case "calc":
-				exp, err := govaluate.NewEvaluableExpression(alert.Code)
-				res, err := exp.Evaluate(P)
-
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				if res == true {
-					fmt.Printf("%s: %s (Calc)\n", c.Name, alert.Name)
-				}
-			default:
-			}
-		}
-
-		if config.Verbose {
-			enc := json.NewEncoder(os.Stdout)
-			enc.Encode(result)
+			runAlert(L, P, c.Alerts[j])
 		}
 	}
 
 	for j := range config.Alerts {
-		alert := config.Alerts[j]
+		runAlert(Lg, Pg, config.Alerts[j])
+	}
 
-		switch alert.Type {
-		case "lua":
-			err = Lg.DoString(alert.Code)
-
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			if luaResult {
-				fmt.Printf("%s (Lua)\n", alert.Name)
-				luaResult = false
-			}
-		case "calc":
-			exp, err := govaluate.NewEvaluableExpression(alert.Code)
-			res, err := exp.Evaluate(Pg)
-
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			if res == true {
-				fmt.Printf("%s (Calc)\n", alert.Name)
-			}
-		default:
-		}
+	if config.Verbose {
+		enc := json.NewEncoder(os.Stdout)
+		enc.Encode(result)
 	}
 }
