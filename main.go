@@ -46,7 +46,7 @@ type params map[string]interface{}
 type results map[string]map[string][]float64
 
 type scriptState struct {
-	calc map[string]interface{}
+	expr map[string]interface{}
 	lua  *lua.LState
 }
 
@@ -64,11 +64,11 @@ func reverse(numbers []float64) {
 	}
 }
 
-func setLua(L *lua.LState, name string, value interface{}) {
+func luaState(L *lua.LState, name string, value interface{}) {
 	L.SetGlobal(name, luar.New(L, value))
 }
 
-func setCalc(P params, name string, value interface{}) {
+func exprState(P params, name string, value interface{}) {
 	P[name] = value
 }
 
@@ -84,7 +84,7 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 
 	switch alert.Type {
 	case "lua":
-		setLua(L, "alert", func(v bool) { luaResult = v })
+		luaState(L, "alert", func(v bool) { luaResult = v })
 
 		err := L.DoString(alert.Code)
 
@@ -96,7 +96,7 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 			fired = true
 			luaResult = false
 		}
-	case "calc":
+	case "expr":
 		exp, err := govaluate.NewEvaluableExpression(alert.Code)
 		res, err := exp.Evaluate(P)
 
@@ -116,8 +116,8 @@ func runAlert(state scriptState, L *lua.LState, P params, alert alert) (bool, no
 func setIndicatorResult(src []float64, cName string, idcName string, L *lua.LState, Lg *lua.LState, P params, Pg params) {
 	Pg[cName+"_"+idcName] = src[0]
 	P[idcName] = src[0]
-	setLua(Lg, cName+"_"+idcName, src)
-	setLua(L, idcName, src)
+	luaState(Lg, cName+"_"+idcName, src)
+	luaState(L, idcName, src)
 }
 
 func loadConfig(file string) {
@@ -134,16 +134,16 @@ func loadConfig(file string) {
 }
 
 func mainLoop(globalState scriptState) (results, []notification) {
-	globalState.calc = make(params, 64)
+	globalState.expr = make(params, 64)
 
 	globalState.lua = lua.NewState()
 	defer globalState.lua.Close()
 
-	Pg := globalState.calc
+	Pg := globalState.expr
 	Lg := globalState.lua
 
-	setCalc(Pg, "length", config.Length)
-	setLua(Lg, "length", config.Length)
+	exprState(Pg, "length", config.Length)
+	luaState(Lg, "length", config.Length)
 
 	result := make(results)
 	var notifications []notification
@@ -156,12 +156,12 @@ func mainLoop(globalState scriptState) (results, []notification) {
 
 		var localState scriptState
 
-		localState.calc = make(params, 64)
+		localState.expr = make(params, 64)
 
 		localState.lua = lua.NewState()
 		defer localState.lua.Close()
 
-		P := localState.calc
+		P := localState.expr
 		L := localState.lua
 
 		if config.Scope == "hour" {
@@ -186,39 +186,39 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		setCalc(Pg, c.Name+"_coin", c.Coin)
-		setCalc(Pg, c.Name+"_currency", c.Currency)
+		exprState(Pg, c.Name+"_coin", c.Coin)
+		exprState(Pg, c.Name+"_currency", c.Currency)
 
-		setCalc(Pg, c.Name+"_open", open[0])
-		setCalc(Pg, c.Name+"_high", high[0])
-		setCalc(Pg, c.Name+"_low", low[0])
-		setCalc(Pg, c.Name+"_close", close[0])
+		exprState(Pg, c.Name+"_open", open[0])
+		exprState(Pg, c.Name+"_high", high[0])
+		exprState(Pg, c.Name+"_low", low[0])
+		exprState(Pg, c.Name+"_close", close[0])
 
-		setCalc(P, "coin", c.Coin)
-		setCalc(P, "currency", c.Currency)
-		setCalc(P, "length", config.Length)
+		exprState(P, "coin", c.Coin)
+		exprState(P, "currency", c.Currency)
+		exprState(P, "length", config.Length)
 
-		setCalc(P, "open", open[0])
-		setCalc(P, "high", high[0])
-		setCalc(P, "low", low[0])
-		setCalc(P, "close", close[0])
+		exprState(P, "open", open[0])
+		exprState(P, "high", high[0])
+		exprState(P, "low", low[0])
+		exprState(P, "close", close[0])
 
-		setLua(Lg, c.Name+"_coin", c.Coin)
-		setLua(Lg, c.Name+"_currency", c.Currency)
+		luaState(Lg, c.Name+"_coin", c.Coin)
+		luaState(Lg, c.Name+"_currency", c.Currency)
 
-		setLua(Lg, c.Name+"_open", open)
-		setLua(Lg, c.Name+"_high", high)
-		setLua(Lg, c.Name+"_low", low)
-		setLua(Lg, c.Name+"_close", close)
+		luaState(Lg, c.Name+"_open", open)
+		luaState(Lg, c.Name+"_high", high)
+		luaState(Lg, c.Name+"_low", low)
+		luaState(Lg, c.Name+"_close", close)
 
-		setLua(L, "coin", c.Coin)
-		setLua(L, "currency", c.Currency)
-		setLua(L, "length", config.Length)
+		luaState(L, "coin", c.Coin)
+		luaState(L, "currency", c.Currency)
+		luaState(L, "length", config.Length)
 
-		setLua(L, "open", open)
-		setLua(L, "high", high)
-		setLua(L, "low", low)
-		setLua(L, "close", close)
+		luaState(L, "open", open)
+		luaState(L, "high", high)
+		luaState(L, "low", low)
+		luaState(L, "close", close)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
