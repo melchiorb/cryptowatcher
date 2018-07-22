@@ -78,21 +78,36 @@ func main() {
 		data := cc.Histoday(c.Coin, c.Currency, config.Length, c.Exchange).Data
 		src := cc.Close(data)
 
+		open := cc.Open(data)
+		reverse(open)
+		high := cc.High(data)
+		reverse(high)
+		low := cc.Low(data)
+		reverse(low)
 		close := cc.Close(data)
 		reverse(close)
 
+		result[c.Name]["open"] = open
+		result[c.Name]["high"] = high
+		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		params := make(map[string]interface{}, 16)
+		params := make(map[string]interface{}, 64)
 		params["coin"] = c.Coin
 		params["currency"] = c.Currency
 		params["length"] = config.Length
+		params["open"] = open[0]
+		params["high"] = high[0]
+		params["low"] = low[0]
 		params["close"] = close[0]
 
 		L := lua.NewState()
 		defer L.Close()
 
 		L.SetGlobal("alert", luar.New(L, luaAlert))
+		L.SetGlobal("open", luar.New(L, open))
+		L.SetGlobal("high", luar.New(L, high))
+		L.SetGlobal("low", luar.New(L, low))
 		L.SetGlobal("close", luar.New(L, close))
 
 		for j := range c.Indicators {

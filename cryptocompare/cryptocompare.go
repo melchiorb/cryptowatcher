@@ -57,6 +57,36 @@ func query(q string, params []string) []byte {
 	return body
 }
 
+// Open gets the open price from Data returned by the API
+func Open(data []Tick) []float64 {
+	result := []float64{}
+	for i := range data {
+		result = append(result, data[i].Open)
+	}
+
+	return result
+}
+
+// High gets the high price from Data returned by the API
+func High(data []Tick) []float64 {
+	result := []float64{}
+	for i := range data {
+		result = append(result, data[i].High)
+	}
+
+	return result
+}
+
+// Low gets the low price from Data returned by the API
+func Low(data []Tick) []float64 {
+	result := []float64{}
+	for i := range data {
+		result = append(result, data[i].Low)
+	}
+
+	return result
+}
+
 // Close gets the close price from Data returned by the API
 func Close(data []Tick) []float64 {
 	result := []float64{}
