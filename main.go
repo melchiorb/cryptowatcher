@@ -75,7 +75,14 @@ func main() {
 		c := config.Checks[i]
 		result[c.Name] = make(map[string][]float64)
 
-		data := cc.Histoday(c.Coin, c.Currency, config.Length, c.Exchange).Data
+		var data []cc.Tick
+
+		if config.Scope == "hour" {
+			data = cc.Histohour(c.Coin, c.Currency, config.Length, c.Exchange).Data
+		} else {
+			data = cc.Histoday(c.Coin, c.Currency, config.Length, c.Exchange).Data
+		}
+
 		src := cc.Close(data)
 
 		open := cc.Open(data)
@@ -154,7 +161,7 @@ func main() {
 				}
 
 				if luaResult {
-					fmt.Println(alert.Name)
+					fmt.Printf("%s: %s (Lua)\n", c.Name, alert.Name)
 					luaResult = false
 				}
 			case "calc":
@@ -166,7 +173,7 @@ func main() {
 				}
 
 				if res == true {
-					fmt.Println(alert.Name)
+					fmt.Printf("%s: %s (Calc)\n", c.Name, alert.Name)
 				}
 			default:
 			}
