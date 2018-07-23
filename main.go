@@ -39,16 +39,9 @@ type notification struct {
 	Timestamp string `json:"timestamp"`
 	Message   string `json:"message"`
 	Source    string `json:"source"`
+	Code      string `json:"code"`
 }
 
-type params map[string]interface{}
-
-type results map[string]map[string][]float64
-
-type scriptState struct {
-	expr map[string]interface{}
-	lua  *lua.LState
-}
 
 var config struct {
 	Checks  []check `json:"checks"`
@@ -64,12 +57,33 @@ func reverse(numbers []float64) {
 	}
 }
 
-func luaState(L *lua.LState, name string, value interface{}) {
-	L.SetGlobal(name, luar.New(L, value))
+type exprState map[string]interface{}
+
+type scriptState struct {
+	expr exprState
+	lua  *lua.LState
 }
 
-func exprState(P params, name string, value interface{}) {
-	P[name] = value
+func (state *scriptState) init() {
+	state.expr = make(exprState, 64)
+	state.lua = lua.NewState()
+}
+
+func (state *scriptState) close() {
+	state.lua.Close()
+}
+
+func (state *scriptState) setLua(name string, value interface{}) {
+	state.lua.SetGlobal(name, luar.New(state.lua, value))
+}
+
+func (state *scriptState) setExpr(name string, value interface{}) {
+	state.expr[name] = value
+}
+
+func (state *scriptState) setAll(name string, value interface{}) {
+	state.setExpr(name, value)
+	state.setLua(name, value)
 }
 
 func runAlert(state scriptState, alert alert) (bool, notification) {
@@ -78,13 +92,13 @@ func runAlert(state scriptState, alert alert) (bool, notification) {
 	var n notification
 	n.Timestamp = time.Now().Format(time.RFC850)
 	n.Message = alert.Name
-	n.Source = alert.Code
+	n.Code = alert.Code
 
 	luaResult := false
 
 	switch alert.Type {
 	case "lua":
-		luaState(state.lua, "alert", func(v bool) { luaResult = v })
+		state.setLua("alert", func(v bool) { luaResult = v })
 
 		err := state.lua.DoString(alert.Code)
 
@@ -114,11 +128,11 @@ func runAlert(state scriptState, alert alert) (bool, notification) {
 }
 
 func setIndicatorResult(src []float64, cName string, idcName string, localState scriptState, globalState scriptState) {
-	exprState(globalState.expr, cName+"_"+idcName, src[0])
-	exprState(localState.expr, idcName, src[0])
+	globalState.setExpr(cName+"_"+idcName, src[0])
+	localState.setExpr(idcName, src[0])
 
-	luaState(globalState.lua, cName+"_"+idcName, src)
-	luaState(localState.lua, idcName, src)
+	globalState.setLua(cName+"_"+idcName, src)
+	localState.setLua(idcName, src)
 }
 
 func loadConfig(file string) {
@@ -135,16 +149,9 @@ func loadConfig(file string) {
 }
 
 func mainLoop(globalState scriptState) (results, []notification) {
-	globalState.expr = make(params, 64)
+	globalState.init()
+	defer globalState.close()
 
-	globalState.lua = lua.NewState()
-	defer globalState.lua.Close()
-
-	gExpr := globalState.expr
-	gLua := globalState.lua
-
-	exprState(gExpr, "length", config.Length)
-	luaState(gLua, "length", config.Length)
 
 	result := make(results)
 	var notifications []notification
@@ -157,13 +164,8 @@ func mainLoop(globalState scriptState) (results, []notification) {
 
 		var localState scriptState
 
-		localState.expr = make(params, 64)
-
-		localState.lua = lua.NewState()
-		defer localState.lua.Close()
-
-		lExpr := localState.expr
-		lLua := localState.lua
+		localState.init()
+		defer localState.close()
 
 		if config.Scope == "hour" {
 			data = cc.Histohour(c.Coin, c.Currency, config.Length, c.Exchange).Data
@@ -187,39 +189,33 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		result[c.Name]["low"] = low
 		result[c.Name]["close"] = close
 
-		exprState(gExpr, c.Name+"_coin", c.Coin)
-		exprState(gExpr, c.Name+"_currency", c.Currency)
+		globalState.setAll(c.Name+"_coin", c.Coin)
+		globalState.setAll(c.Name+"_currency", c.Currency)
+		globalState.setAll("length", config.Length)
 
-		exprState(gExpr, c.Name+"_open", open[0])
-		exprState(gExpr, c.Name+"_high", high[0])
-		exprState(gExpr, c.Name+"_low", low[0])
-		exprState(gExpr, c.Name+"_close", close[0])
+		localState.setAll("coin", c.Coin)
+		localState.setAll("currency", c.Currency)
+		localState.setAll("length", config.Length)
 
-		exprState(lExpr, "coin", c.Coin)
-		exprState(lExpr, "currency", c.Currency)
-		exprState(lExpr, "length", config.Length)
+		globalState.setExpr(c.Name+"_open", open[0])
+		globalState.setExpr(c.Name+"_high", high[0])
+		globalState.setExpr(c.Name+"_low", low[0])
+		globalState.setExpr(c.Name+"_close", close[0])
 
-		exprState(lExpr, "open", open[0])
-		exprState(lExpr, "high", high[0])
-		exprState(lExpr, "low", low[0])
-		exprState(lExpr, "close", close[0])
+		localState.setExpr("open", open[0])
+		localState.setExpr("high", high[0])
+		localState.setExpr("low", low[0])
+		localState.setExpr("close", close[0])
 
-		luaState(gLua, c.Name+"_coin", c.Coin)
-		luaState(gLua, c.Name+"_currency", c.Currency)
+		globalState.setLua(c.Name+"_open", open)
+		globalState.setLua(c.Name+"_high", high)
+		globalState.setLua(c.Name+"_low", low)
+		globalState.setLua(c.Name+"_close", close)
 
-		luaState(gLua, c.Name+"_open", open)
-		luaState(gLua, c.Name+"_high", high)
-		luaState(gLua, c.Name+"_low", low)
-		luaState(gLua, c.Name+"_close", close)
-
-		luaState(lLua, "coin", c.Coin)
-		luaState(lLua, "currency", c.Currency)
-		luaState(lLua, "length", config.Length)
-
-		luaState(lLua, "open", open)
-		luaState(lLua, "high", high)
-		luaState(lLua, "low", low)
-		luaState(lLua, "close", close)
+		localState.setLua("open", open)
+		localState.setLua("high", high)
+		localState.setLua("low", low)
+		localState.setLua("close", close)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
@@ -254,6 +250,7 @@ func mainLoop(globalState scriptState) (results, []notification) {
 			fired, n := runAlert(localState, c.Alerts[j])
 
 			if fired {
+				n.Source = c.Name
 				notifications = append(notifications, n)
 			}
 		}
