@@ -129,14 +129,6 @@ func runAlert(state scriptState, alert alert) (bool, notification) {
 	return fired, n
 }
 
-func setIndicatorResult(src []float64, cName string, idcName string, localState scriptState, globalState scriptState) {
-	globalState.setExpr(cName+"_"+idcName, src[0])
-	localState.setExpr(idcName, src[0])
-
-	globalState.setLua(cName+"_"+idcName, src)
-	localState.setLua(idcName, src)
-}
-
 func loadConfig(file string) {
 	configFile, err := os.Open(file)
 	if err != nil {
@@ -148,6 +140,22 @@ func loadConfig(file string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func processIndicators(src []float64, idc indicator) []float64 {
+	var result []float64
+
+	switch idc.Type {
+	case "rsi":
+		result = talib.Rsi(src, idc.Params[0])
+	case "ema":
+		result = talib.Ema(src, idc.Params[0])
+	case "macd":
+		_, _, result = talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
+	}
+
+	reverse(result)
+	return result
 }
 
 func mainLoop(globalState scriptState, notifications chan<- notification, results chan<- dataset) {
@@ -219,30 +227,13 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
 
-			switch idc.Type {
-			case "rsi":
-				rsi := talib.Rsi(src, idc.Params[0])
-				reverse(rsi)
+			result[idc.Name] = processIndicators(src, idc)
 
-				setIndicatorResult(rsi, c.Name, idc.Name, localState, globalState)
+			globalState.setExpr(c.Name+"_"+idc.Name, src[0])
+			globalState.setLua(c.Name+"_"+idc.Name, src)
 
-				result[idc.Name] = rsi
-			case "ema":
-				ema := talib.Ema(src, idc.Params[0])
-				reverse(ema)
-
-				setIndicatorResult(ema, c.Name, idc.Name, localState, globalState)
-
-				result[idc.Name] = ema
-			case "macd":
-				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
-				reverse(hist)
-
-				setIndicatorResult(hist, c.Name, idc.Name, localState, globalState)
-
-				result[idc.Name] = hist
-			default:
-			}
+			localState.setExpr(idc.Name, src[0])
+			localState.setLua(idc.Name, src)
 		}
 
 		results <- result
