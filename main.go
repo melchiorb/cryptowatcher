@@ -45,6 +45,8 @@ type notification struct {
 
 type dataset map[string][]float64
 
+type ohlcv5 [5][]float64
+
 var config struct {
 	Checks  []check `json:"checks"`
 	Alerts  []alert `json:"alerts"`
@@ -53,10 +55,12 @@ var config struct {
 	Verbose bool    `json:"verbose"`
 }
 
-func reverse(numbers []float64) {
+func reverse(numbers []float64) []float64 {
+	newNumbers := make([]float64, len(numbers))
 	for i, j := 0, len(numbers)-1; i < j; i, j = i+1, j-1 {
-		numbers[i], numbers[j] = numbers[j], numbers[i]
+		newNumbers[i], newNumbers[j] = numbers[j], numbers[i]
 	}
+	return newNumbers
 }
 
 type exprState map[string]interface{}
@@ -142,16 +146,48 @@ func loadConfig(file string) {
 	}
 }
 
-func processIndicators(src []float64, idc indicator) []float64 {
+func processIndicators(src ohlcv5, idc indicator) []float64 {
 	var result []float64
 
 	switch idc.Type {
-	case "rsi":
-		result = talib.Rsi(src, idc.Params[0])
+	case "sma":
+		result = talib.Sma(src[3], idc.Params[0])
 	case "ema":
-		result = talib.Ema(src, idc.Params[0])
+		result = talib.Ema(src[3], idc.Params[0])
+	case "dema":
+		result = talib.Dema(src[3], idc.Params[0])
+	case "tema":
+		result = talib.Tema(src[3], idc.Params[0])
+	case "wma":
+		result = talib.Wma(src[3], idc.Params[0])
+	case "rsi":
+		result = talib.Rsi(src[3], idc.Params[0])
+	case "stochrsi":
+		_, result = talib.StochRsi(src[3], idc.Params[0], idc.Params[1], idc.Params[2], talib.SMA)
+	case "stoch":
+		_, result = talib.Stoch(src[1], src[2], src[3], idc.Params[0], idc.Params[1], talib.SMA, idc.Params[2], talib.SMA)
 	case "macd":
-		_, _, result = talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
+		_, _, result = talib.Macd(src[3], idc.Params[0], idc.Params[1], idc.Params[2])
+	case "mom":
+		result = talib.Mom(src[3], idc.Params[0])
+	case "mfi":
+		result = talib.Mfi(src[1], src[2], src[3], src[4], idc.Params[0])
+	case "adx":
+		result = talib.Adx(src[1], src[2], src[3], idc.Params[0])
+	case "roc":
+		result = talib.Roc(src[3], idc.Params[0])
+	case "obv":
+		result = talib.Obv(src[3], src[4])
+	case "atr":
+		result = talib.Atr(src[1], src[2], src[3], idc.Params[0])
+	case "natr":
+		result = talib.Natr(src[1], src[2], src[3], idc.Params[0])
+	case "linearreg":
+		result = talib.LinearReg(src[3], idc.Params[0])
+	case "max":
+		result = talib.Max(src[3], idc.Params[0])
+	case "min":
+		result = talib.Min(src[3], idc.Params[0])
 	}
 
 	reverse(result)
@@ -183,18 +219,22 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		src := cc.Close(data)
 
 		open := cc.Open(data)
-		reverse(open)
 		high := cc.High(data)
-		reverse(high)
 		low := cc.Low(data)
-		reverse(low)
 		close := cc.Close(data)
-		reverse(close)
+		vol := cc.VolumeFrom(data)
 
-		result["open"] = open
-		result["high"] = high
-		result["low"] = low
-		result["close"] = close
+		rOpen := reverse(open)
+		rHigh := reverse(high)
+		rLow := reverse(low)
+		rClose := reverse(close)
+		rVol := reverse(vol)
+
+		result["open"] = rOpen
+		result["high"] = rHigh
+		result["low"] = rLow
+		result["close"] = rClose
+		result["vol"] = rVol
 
 		globalState.setAll(c.Name+"_coin", c.Coin)
 		globalState.setAll(c.Name+"_currency", c.Currency)
@@ -204,30 +244,36 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		localState.setAll("currency", c.Currency)
 		localState.setAll("length", config.Length)
 
-		globalState.setExpr(c.Name+"_open", open[0])
-		globalState.setExpr(c.Name+"_high", high[0])
-		globalState.setExpr(c.Name+"_low", low[0])
-		globalState.setExpr(c.Name+"_close", close[0])
+		globalState.setExpr(c.Name+"_open", rOpen[0])
+		globalState.setExpr(c.Name+"_high", rHigh[0])
+		globalState.setExpr(c.Name+"_low", rLow[0])
+		globalState.setExpr(c.Name+"_close", rClose[0])
+		globalState.setExpr(c.Name+"_vol", rVol[0])
 
-		localState.setExpr("open", open[0])
-		localState.setExpr("high", high[0])
-		localState.setExpr("low", low[0])
-		localState.setExpr("close", close[0])
+		localState.setExpr("open", rOpen[0])
+		localState.setExpr("high", rHigh[0])
+		localState.setExpr("low", rLow[0])
+		localState.setExpr("close", rClose[0])
+		localState.setExpr("vol", rVol[0])
 
-		globalState.setLua(c.Name+"_open", open)
-		globalState.setLua(c.Name+"_high", high)
-		globalState.setLua(c.Name+"_low", low)
-		globalState.setLua(c.Name+"_close", close)
+		globalState.setLua(c.Name+"_open", rOpen)
+		globalState.setLua(c.Name+"_high", rHigh)
+		globalState.setLua(c.Name+"_low", rLow)
+		globalState.setLua(c.Name+"_close", rClose)
+		globalState.setLua(c.Name+"_vol", rVol)
 
-		localState.setLua("open", open)
-		localState.setLua("high", high)
-		localState.setLua("low", low)
-		localState.setLua("close", close)
+		localState.setLua("open", rOpen)
+		localState.setLua("high", rHigh)
+		localState.setLua("low", rLow)
+		localState.setLua("close", rClose)
+		localState.setLua("vol", rVol)
 
 		for j := range c.Indicators {
 			idc := c.Indicators[j]
 
-			result[idc.Name] = processIndicators(src, idc)
+			ohlcv := ohlcv5{open, high, low, close, vol}
+
+			result[idc.Name] = processIndicators(ohlcv, idc)
 
 			globalState.setExpr(c.Name+"_"+idc.Name, src[0])
 			globalState.setLua(c.Name+"_"+idc.Name, src)

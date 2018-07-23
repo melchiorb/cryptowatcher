@@ -97,6 +97,16 @@ func Close(data []Tick) []float64 {
 	return result
 }
 
+// VolumeFrom gets the close price from Data returned by the API
+func VolumeFrom(data []Tick) []float64 {
+	result := []float64{}
+	for i := range data {
+		result = append(result, data[i].VolumeFrom)
+	}
+
+	return result
+}
+
 // Histoday https://min-api.cryptocompare.com
 func Histoday(fsym string, tsym string, limit int, e string) *Historical {
 	var params []string
