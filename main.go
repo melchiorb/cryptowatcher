@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -42,6 +43,7 @@ type notification struct {
 	Code      string `json:"code"`
 }
 
+type dataset map[string][]float64
 
 var config struct {
 	Checks  []check `json:"checks"`
@@ -148,18 +150,15 @@ func loadConfig(file string) {
 	}
 }
 
-func mainLoop(globalState scriptState) (results, []notification) {
+func mainLoop(globalState scriptState, notifications chan<- notification, results chan<- dataset) {
 	globalState.init()
 	defer globalState.close()
-
-
-	result := make(results)
-	var notifications []notification
 
 	for i := range config.Checks {
 		c := config.Checks[i]
 
-		result[c.Name] = make(map[string][]float64)
+		result := make(dataset)
+
 		var data []cc.Tick
 
 		var localState scriptState
@@ -184,10 +183,10 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		close := cc.Close(data)
 		reverse(close)
 
-		result[c.Name]["open"] = open
-		result[c.Name]["high"] = high
-		result[c.Name]["low"] = low
-		result[c.Name]["close"] = close
+		result["open"] = open
+		result["high"] = high
+		result["low"] = low
+		result["close"] = close
 
 		globalState.setAll(c.Name+"_coin", c.Coin)
 		globalState.setAll(c.Name+"_currency", c.Currency)
@@ -227,31 +226,33 @@ func mainLoop(globalState scriptState) (results, []notification) {
 
 				setIndicatorResult(rsi, c.Name, idc.Name, localState, globalState)
 
-				result[c.Name][idc.Name] = rsi
+				result[idc.Name] = rsi
 			case "ema":
 				ema := talib.Ema(src, idc.Params[0])
 				reverse(ema)
 
 				setIndicatorResult(ema, c.Name, idc.Name, localState, globalState)
 
-				result[c.Name][idc.Name] = ema
+				result[idc.Name] = ema
 			case "macd":
 				_, _, hist := talib.Macd(src, idc.Params[0], idc.Params[1], idc.Params[2])
 				reverse(hist)
 
 				setIndicatorResult(hist, c.Name, idc.Name, localState, globalState)
 
-				result[c.Name][idc.Name] = hist
+				result[idc.Name] = hist
 			default:
 			}
 		}
+
+		results <- result
 
 		for j := range c.Alerts {
 			fired, n := runAlert(localState, c.Alerts[j])
 
 			if fired {
 				n.Source = c.Name
-				notifications = append(notifications, n)
+				notifications <- n
 			}
 		}
 	}
@@ -260,11 +261,9 @@ func mainLoop(globalState scriptState) (results, []notification) {
 		fired, n := runAlert(globalState, config.Alerts[j])
 
 		if fired {
-			notifications = append(notifications, n)
+			notifications <- n
 		}
 	}
-
-	return result, notifications
 }
 
 func main() {
@@ -276,15 +275,26 @@ func main() {
 
 	var state scriptState
 
-	result, notifications := mainLoop(state)
+	notifications := make(chan notification)
+	results := make(chan dataset)
 
-	output := make(map[string]interface{})
-	output["alerts"] = notifications
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
-	if config.Verbose {
-		output["data"] = result
+	go func() {
+		mainLoop(state, notifications, results)
+
+		for range ticker.C {
+			mainLoop(state, notifications, results)
+		}
+	}()
+
+	for {
+		select {
+		case n := <-notifications:
+			fmt.Printf("Notification: %v\n", n)
+		case r := <-results:
+			fmt.Printf("Results: %v\n", r)
+		}
 	}
-
-	enc := json.NewEncoder(os.Stdout)
-	enc.Encode(output)
 }
