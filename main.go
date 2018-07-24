@@ -48,6 +48,12 @@ type dataset map[string]timeseries
 
 type ohlcv5 [5]timeseries
 
+type key struct {
+	Tradingpair, Watcher string
+}
+
+var cache map[key]uint64
+
 var config struct {
 	Tradingpairs []tradingpair `json:"tradingpairs"`
 	Watchers     []watcher     `json:"watchers"`
@@ -286,20 +292,35 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		results <- result
 
 		for j := range t.Watchers {
-			fired, n := executeWatcher(localState, t.Watchers[j])
+			w := t.Watchers[j]
+			fired, n := executeWatcher(localState, w)
 
 			if fired {
-				n.Source = t.Name
-				notifications <- n
+				if cache[key{t.Name, w.Name}] == 0 {
+					n.Source = t.Name
+					notifications <- n
+				}
+
+				cache[key{t.Name, w.Name}]++
+			} else {
+				cache[key{t.Name, w.Name}] = 0
 			}
 		}
 	}
 
 	for j := range config.Watchers {
-		fired, n := executeWatcher(globalState, config.Watchers[j])
+		w := config.Watchers[j]
+
+		fired, n := executeWatcher(globalState, w)
 
 		if fired {
-			notifications <- n
+			if cache[key{"global", w.Name}] == 0 {
+				notifications <- n
+			}
+
+			cache[key{"global", w.Name}]++
+		} else {
+			cache[key{"global", w.Name}] = 0
 		}
 	}
 }
@@ -312,6 +333,8 @@ func main() {
 	}
 
 	var state scriptState
+
+	cache = make(map[key]uint64)
 
 	notifications := make(chan notification)
 	results := make(chan dataset)
