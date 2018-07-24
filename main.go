@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	cc "./cryptocompare"
@@ -36,6 +39,13 @@ type tradingpair struct {
 	Watchers   []watcher   `json:"watchers"`
 }
 
+type notifier struct {
+	Type      string `json:"type"`
+	Recipient string `json:"recipient"`
+	Sender    string `json:"sender"`
+	Auth      string `json:"auth"`
+}
+
 type notification struct {
 	Timestamp string `json:"timestamp"`
 	Message   string `json:"message"`
@@ -57,6 +67,7 @@ var cache map[key]uint64
 var config struct {
 	Tradingpairs []tradingpair `json:"tradingpairs"`
 	Watchers     []watcher     `json:"watchers"`
+	Notifiers    []notifier    `json:"notifiers"`
 	Scope        string        `json:"scope"`
 	Length       int           `json:"length"`
 	Verbose      bool          `json:"verbose"`
@@ -97,6 +108,40 @@ func (state *scriptState) setExpr(name string, value interface{}) {
 func (state *scriptState) setAll(name string, value interface{}) {
 	state.setExpr(name, value)
 	state.setLua(name, value)
+}
+
+func (n notification) format() string {
+	message := "{source} Notification\n{message}\n{code}"
+
+	message = strings.Replace(message, "{source}", n.Source, -1)
+	message = strings.Replace(message, "{message}", n.Message, -1)
+	message = strings.Replace(message, "{code}", n.Code, -1)
+
+	return message
+}
+
+func sendNotification(n notification) {
+	for i := range config.Notifiers {
+		notif := config.Notifiers[i]
+
+		switch notif.Type {
+		case "telegram":
+			notifyTelegram(n, notif)
+		default:
+			fmt.Printf("Notification: %v\n", n)
+		}
+	}
+}
+
+func notifyTelegram(n notification, notif notifier) {
+	link := "https://api.telegram.org/bot{botId}:{apiKey}/sendMessage?chat_id={chatId}&text={text}"
+
+	link = strings.Replace(link, "{botId}", notif.Sender, -1)
+	link = strings.Replace(link, "{apiKey}", notif.Auth, -1)
+	link = strings.Replace(link, "{chatId}", notif.Recipient, -1)
+	link = strings.Replace(link, "{text}", url.QueryEscape(n.format()), -1)
+
+	_, _ = http.Get(link)
 }
 
 func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
@@ -351,6 +396,8 @@ func main() {
 	for {
 		select {
 		case n := <-notifications:
+			go sendNotification(n)
+
 			fmt.Printf("Notification: %v\n", n)
 		case r := <-results:
 			if config.Verbose {
