@@ -140,19 +140,6 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 	return fired, n
 }
 
-func loadConfig(file string) {
-	configFile, err := os.Open(file)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	jsonParser := json.NewDecoder(configFile)
-	err = jsonParser.Decode(&config)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func processIndicators(src ohlcv5, idc indicator) timeseries {
 	var result timeseries
 
@@ -197,11 +184,11 @@ func processIndicators(src ohlcv5, idc indicator) timeseries {
 		result = talib.Min(src[3], idc.Params[0])
 	}
 
-	reverse(result)
 	return result
 }
 
-func mainLoop(globalState scriptState, notifications chan<- notification, results chan<- dataset) {
+func mainLoop(notifications chan<- notification, results chan<- dataset) {
+	var globalState scriptState
 	globalState.init()
 	defer globalState.close()
 
@@ -213,7 +200,6 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		var data []cc.Tick
 
 		var localState scriptState
-
 		localState.init()
 		defer localState.close()
 
@@ -235,11 +221,11 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		rClose := reverse(close)
 		rVol := reverse(vol)
 
-		result["open"] = rOpen
-		result["high"] = rHigh
-		result["low"] = rLow
-		result["close"] = rClose
-		result["vol"] = rVol
+		result["open"] = open
+		result["high"] = high
+		result["low"] = low
+		result["close"] = close
+		result["vol"] = vol
 
 		globalState.setAll(t.Name+"_coin", t.Coin)
 		globalState.setAll(t.Name+"_currency", t.Currency)
@@ -279,12 +265,13 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
 			output := processIndicators(ohlcv, idc)
+			rOutput := reverse(output)
 
-			globalState.setExpr(t.Name+"_"+idc.Name, output[0])
-			globalState.setLua(t.Name+"_"+idc.Name, output)
+			globalState.setExpr(t.Name+"_"+idc.Name, rOutput[0])
+			globalState.setLua(t.Name+"_"+idc.Name, rOutput)
 
-			localState.setExpr(idc.Name, output[0])
-			localState.setLua(idc.Name, output)
+			localState.setExpr(idc.Name, rOutput[0])
+			localState.setLua(idc.Name, rOutput)
 
 			result[idc.Name] = output
 		}
@@ -325,14 +312,25 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 	}
 }
 
+func loadConfig(file string) {
+	configFile, err := os.Open(file)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	jsonParser := json.NewDecoder(configFile)
+	err = jsonParser.Decode(&config)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func main() {
 	if len(os.Args) >= 2 {
 		loadConfig(os.Args[1])
 	} else {
 		loadConfig("config.json")
 	}
-
-	var state scriptState
 
 	cache = make(map[key]uint64)
 
@@ -343,10 +341,10 @@ func main() {
 	defer ticker.Stop()
 
 	go func() {
-		mainLoop(state, notifications, results)
+		mainLoop(notifications, results)
 
 		for range ticker.C {
-			mainLoop(state, notifications, results)
+			mainLoop(notifications, results)
 		}
 	}()
 
