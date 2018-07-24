@@ -223,8 +223,6 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 			data = cc.Histoday(t.Coin, t.Currency, config.Length, t.Exchange).Data
 		}
 
-		src := cc.Close(data)
-
 		open := cc.Open(data)
 		high := cc.High(data)
 		low := cc.Low(data)
@@ -280,13 +278,15 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
-			result[idc.Name] = processIndicators(ohlcv, idc)
+			output := processIndicators(ohlcv, idc)
 
-			globalState.setExpr(t.Name+"_"+idc.Name, src[0])
-			globalState.setLua(t.Name+"_"+idc.Name, src)
+			globalState.setExpr(t.Name+"_"+idc.Name, output[0])
+			globalState.setLua(t.Name+"_"+idc.Name, output)
 
-			localState.setExpr(idc.Name, src[0])
-			localState.setLua(idc.Name, src)
+			localState.setExpr(idc.Name, output[0])
+			localState.setLua(idc.Name, output)
+
+			result[idc.Name] = output
 		}
 
 		results <- result
