@@ -21,19 +21,19 @@ type indicator struct {
 	Params []int  `json:"params"`
 }
 
-type alert struct {
+type watcher struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	Code string `json:"code"`
 }
 
-type check struct {
+type tradingpair struct {
 	Name       string      `json:"name"`
 	Coin       string      `json:"coin"`
 	Currency   string      `json:"currency"`
 	Exchange   string      `json:"exchange"`
 	Indicators []indicator `json:"indicators"`
-	Alerts     []alert     `json:"alerts"`
+	Watchers   []watcher   `json:"watchers"`
 }
 
 type notification struct {
@@ -43,20 +43,21 @@ type notification struct {
 	Code      string `json:"code"`
 }
 
-type dataset map[string][]float64
+type timeseries = []float64
+type dataset map[string]timeseries
 
-type ohlcv5 [5][]float64
+type ohlcv5 [5]timeseries
 
 var config struct {
-	Checks  []check `json:"checks"`
-	Alerts  []alert `json:"alerts"`
-	Scope   string  `json:"scope"`
-	Length  int     `json:"length"`
-	Verbose bool    `json:"verbose"`
+	Tradingpairs []tradingpair `json:"tradingpairs"`
+	Watchers     []watcher     `json:"watchers"`
+	Scope        string        `json:"scope"`
+	Length       int           `json:"length"`
+	Verbose      bool          `json:"verbose"`
 }
 
-func reverse(numbers []float64) []float64 {
-	newNumbers := make([]float64, len(numbers))
+func reverse(numbers timeseries) timeseries {
+	newNumbers := make(timeseries, len(numbers))
 	for i, j := 0, len(numbers)-1; i < j; i, j = i+1, j-1 {
 		newNumbers[i], newNumbers[j] = numbers[j], numbers[i]
 	}
@@ -92,21 +93,21 @@ func (state *scriptState) setAll(name string, value interface{}) {
 	state.setLua(name, value)
 }
 
-func runAlert(state scriptState, alert alert) (bool, notification) {
+func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 	fired := false
 
 	var n notification
 	n.Timestamp = time.Now().Format(time.RFC850)
-	n.Message = alert.Name
-	n.Code = alert.Code
+	n.Message = watcher.Name
+	n.Code = watcher.Code
 
 	luaResult := false
 
-	switch alert.Type {
+	switch watcher.Type {
 	case "lua":
 		state.setLua("alert", func(v bool) { luaResult = v })
 
-		err := state.lua.DoString(alert.Code)
+		err := state.lua.DoString(watcher.Code)
 
 		if err != nil {
 			log.Fatal(err)
@@ -117,7 +118,7 @@ func runAlert(state scriptState, alert alert) (bool, notification) {
 			luaResult = false
 		}
 	case "expr":
-		exp, err := govaluate.NewEvaluableExpression(alert.Code)
+		exp, err := govaluate.NewEvaluableExpression(watcher.Code)
 		res, err := exp.Evaluate(state.expr)
 
 		if err != nil {
@@ -146,8 +147,8 @@ func loadConfig(file string) {
 	}
 }
 
-func processIndicators(src ohlcv5, idc indicator) []float64 {
-	var result []float64
+func processIndicators(src ohlcv5, idc indicator) timeseries {
+	var result timeseries
 
 	switch idc.Type {
 	case "sma":
@@ -198,8 +199,8 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 	globalState.init()
 	defer globalState.close()
 
-	for i := range config.Checks {
-		c := config.Checks[i]
+	for i := range config.Tradingpairs {
+		t := config.Tradingpairs[i]
 
 		result := make(dataset)
 
@@ -211,9 +212,9 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		defer localState.close()
 
 		if config.Scope == "hour" {
-			data = cc.Histohour(c.Coin, c.Currency, config.Length, c.Exchange).Data
+			data = cc.Histohour(t.Coin, t.Currency, config.Length, t.Exchange).Data
 		} else {
-			data = cc.Histoday(c.Coin, c.Currency, config.Length, c.Exchange).Data
+			data = cc.Histoday(t.Coin, t.Currency, config.Length, t.Exchange).Data
 		}
 
 		src := cc.Close(data)
@@ -236,19 +237,19 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		result["close"] = rClose
 		result["vol"] = rVol
 
-		globalState.setAll(c.Name+"_coin", c.Coin)
-		globalState.setAll(c.Name+"_currency", c.Currency)
+		globalState.setAll(t.Name+"_coin", t.Coin)
+		globalState.setAll(t.Name+"_currency", t.Currency)
 		globalState.setAll("length", config.Length)
 
-		localState.setAll("coin", c.Coin)
-		localState.setAll("currency", c.Currency)
+		localState.setAll("coin", t.Coin)
+		localState.setAll("currency", t.Currency)
 		localState.setAll("length", config.Length)
 
-		globalState.setExpr(c.Name+"_open", rOpen[0])
-		globalState.setExpr(c.Name+"_high", rHigh[0])
-		globalState.setExpr(c.Name+"_low", rLow[0])
-		globalState.setExpr(c.Name+"_close", rClose[0])
-		globalState.setExpr(c.Name+"_vol", rVol[0])
+		globalState.setExpr(t.Name+"_open", rOpen[0])
+		globalState.setExpr(t.Name+"_high", rHigh[0])
+		globalState.setExpr(t.Name+"_low", rLow[0])
+		globalState.setExpr(t.Name+"_close", rClose[0])
+		globalState.setExpr(t.Name+"_vol", rVol[0])
 
 		localState.setExpr("open", rOpen[0])
 		localState.setExpr("high", rHigh[0])
@@ -256,11 +257,11 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		localState.setExpr("close", rClose[0])
 		localState.setExpr("vol", rVol[0])
 
-		globalState.setLua(c.Name+"_open", rOpen)
-		globalState.setLua(c.Name+"_high", rHigh)
-		globalState.setLua(c.Name+"_low", rLow)
-		globalState.setLua(c.Name+"_close", rClose)
-		globalState.setLua(c.Name+"_vol", rVol)
+		globalState.setLua(t.Name+"_open", rOpen)
+		globalState.setLua(t.Name+"_high", rHigh)
+		globalState.setLua(t.Name+"_low", rLow)
+		globalState.setLua(t.Name+"_close", rClose)
+		globalState.setLua(t.Name+"_vol", rVol)
 
 		localState.setLua("open", rOpen)
 		localState.setLua("high", rHigh)
@@ -268,15 +269,15 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 		localState.setLua("close", rClose)
 		localState.setLua("vol", rVol)
 
-		for j := range c.Indicators {
-			idc := c.Indicators[j]
+		for j := range t.Indicators {
+			idc := t.Indicators[j]
 
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
 			result[idc.Name] = processIndicators(ohlcv, idc)
 
-			globalState.setExpr(c.Name+"_"+idc.Name, src[0])
-			globalState.setLua(c.Name+"_"+idc.Name, src)
+			globalState.setExpr(t.Name+"_"+idc.Name, src[0])
+			globalState.setLua(t.Name+"_"+idc.Name, src)
 
 			localState.setExpr(idc.Name, src[0])
 			localState.setLua(idc.Name, src)
@@ -284,18 +285,18 @@ func mainLoop(globalState scriptState, notifications chan<- notification, result
 
 		results <- result
 
-		for j := range c.Alerts {
-			fired, n := runAlert(localState, c.Alerts[j])
+		for j := range t.Watchers {
+			fired, n := executeWatcher(localState, t.Watchers[j])
 
 			if fired {
-				n.Source = c.Name
+				n.Source = t.Name
 				notifications <- n
 			}
 		}
 	}
 
-	for j := range config.Alerts {
-		fired, n := runAlert(globalState, config.Alerts[j])
+	for j := range config.Watchers {
+		fired, n := executeWatcher(globalState, config.Watchers[j])
 
 		if fired {
 			notifications <- n
@@ -331,7 +332,9 @@ func main() {
 		case n := <-notifications:
 			fmt.Printf("Notification: %v\n", n)
 		case r := <-results:
-			fmt.Printf("Results: %v\n", r)
+			if config.Verbose {
+				fmt.Printf("Results: %v\n", r)
+			}
 		}
 	}
 }
