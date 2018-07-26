@@ -11,6 +11,7 @@ import (
 	"time"
 
 	cc "./cryptocompare"
+	ti "./tradeinterval"
 
 	"github.com/Knetic/govaluate"
 	talib "github.com/markcheno/go-talib"
@@ -68,7 +69,7 @@ var config struct {
 	Tradingpairs []tradingpair `json:"tradingpairs"`
 	Watchers     []watcher     `json:"watchers"`
 	Notifiers    []notifier    `json:"notifiers"`
-	Scope        string        `json:"scope"`
+	Interval     string        `json:"interval"`
 	Length       int           `json:"length"`
 	Verbose      bool          `json:"verbose"`
 }
@@ -248,10 +249,15 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localState.init()
 		defer localState.close()
 
-		if config.Scope == "hour" {
-			data = cc.Histohour(t.Coin, t.Currency, config.Length, t.Exchange).Data
-		} else {
-			data = cc.Histoday(t.Coin, t.Currency, config.Length, t.Exchange).Data
+		Interval := ti.Parse(config.Interval).MinHourDay()
+
+		switch Interval.Unit {
+		case ti.Minute:
+			data = cc.Histominute(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
+		case ti.Hour:
+			data = cc.Histohour(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
+		case ti.Day:
+			data = cc.Histoday(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
 		}
 
 		open := cc.Open(data)

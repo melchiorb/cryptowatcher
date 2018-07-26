@@ -108,10 +108,11 @@ func VolumeFrom(data []Tick) []float64 {
 }
 
 // Histoday https://min-api.cryptocompare.com
-func Histoday(fsym string, tsym string, limit int, e string) *Historical {
+func Histoday(fsym string, tsym string, aggregate int, limit int, e string) *Historical {
 	var params []string
 	params = append(params, fmt.Sprintf("fsym=%s", fsym))
 	params = append(params, fmt.Sprintf("tsym=%s", tsym))
+	params = append(params, fmt.Sprintf("aggregate=%v", aggregate))
 	params = append(params, fmt.Sprintf("limit=%v", limit))
 	params = append(params, fmt.Sprintf("e=%s", e))
 
@@ -128,14 +129,36 @@ func Histoday(fsym string, tsym string, limit int, e string) *Historical {
 }
 
 // Histohour https://min-api.cryptocompare.com
-func Histohour(fsym string, tsym string, limit int, e string) *Historical {
+func Histohour(fsym string, tsym string, aggregate int, limit int, e string) *Historical {
 	var params []string
 	params = append(params, fmt.Sprintf("fsym=%s", fsym))
 	params = append(params, fmt.Sprintf("tsym=%s", tsym))
+	params = append(params, fmt.Sprintf("aggregate=%v", aggregate))
 	params = append(params, fmt.Sprintf("limit=%v", limit))
 	params = append(params, fmt.Sprintf("e=%s", e))
 
 	body := query("histohour", params)
+
+	jsonData := &Historical{}
+
+	err := json.Unmarshal([]byte(body), &jsonData)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return jsonData
+}
+
+// Histominute https://min-api.cryptocompare.com
+func Histominute(fsym string, tsym string, aggregate int, limit int, e string) *Historical {
+	var params []string
+	params = append(params, fmt.Sprintf("fsym=%s", fsym))
+	params = append(params, fmt.Sprintf("tsym=%s", tsym))
+	params = append(params, fmt.Sprintf("aggregate=%v", aggregate))
+	params = append(params, fmt.Sprintf("limit=%v", limit))
+	params = append(params, fmt.Sprintf("e=%s", e))
+
+	body := query("histominute", params)
 
 	jsonData := &Historical{}
 
