@@ -74,6 +74,7 @@ var config struct {
 	Tradingpairs []tradingpair `json:"tradingpairs"`
 	Watchers     []watcher     `json:"watchers"`
 	Notifiers    []notifier    `json:"notifiers"`
+	Update       string        `json:"update"`
 	Verbose      bool          `json:"verbose"`
 }
 
@@ -376,6 +377,8 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 func loadConfig(file string) {
 	configFile, err := os.Open(file)
+	defer configFile.Close()
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -399,7 +402,13 @@ func main() {
 	notifications := make(chan notification)
 	results := make(chan dataset)
 
-	ticker := time.NewTicker(5 * time.Second)
+	update, err := time.ParseDuration(config.Update)
+
+	if err != nil {
+		update = time.Hour
+	}
+
+	ticker := time.NewTicker(update)
 	defer ticker.Stop()
 
 	go func() {
