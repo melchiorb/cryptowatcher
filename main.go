@@ -45,6 +45,7 @@ type notifier struct {
 	Recipient string `json:"recipient"`
 	Sender    string `json:"sender"`
 	Auth      string `json:"auth"`
+	Format    string `json:"format"`
 }
 
 type notification struct {
@@ -111,8 +112,14 @@ func (state *scriptState) setAll(name string, value interface{}) {
 	state.setLua(name, value)
 }
 
-func (n notification) format() string {
-	message := "{source} Notification\n{message}\n{code}"
+func (n notification) format(template string) string {
+	messages := map[string]string{
+		"short":  "{message}",
+		"normal": "{source}\n{message}",
+		"long":   "{source}\n{message}\n{code}",
+	}
+
+	message := messages[template]
 
 	message = strings.Replace(message, "{source}", n.Source, -1)
 	message = strings.Replace(message, "{message}", n.Message, -1)
@@ -129,18 +136,20 @@ func sendNotification(n notification) {
 		case "telegram":
 			notifyTelegram(n, notif)
 		default:
-			fmt.Printf("Notification: %v\n", n)
+			fmt.Println(n.format("short"))
 		}
 	}
 }
 
 func notifyTelegram(n notification, notif notifier) {
+	message := url.QueryEscape(n.format(notif.Format))
+
 	link := "https://api.telegram.org/bot{botId}:{apiKey}/sendMessage?chat_id={chatId}&text={text}"
 
 	link = strings.Replace(link, "{botId}", notif.Sender, -1)
 	link = strings.Replace(link, "{apiKey}", notif.Auth, -1)
 	link = strings.Replace(link, "{chatId}", notif.Recipient, -1)
-	link = strings.Replace(link, "{text}", url.QueryEscape(n.format()), -1)
+	link = strings.Replace(link, "{text}", message, -1)
 
 	_, _ = http.Get(link)
 }
@@ -335,7 +344,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 			if fired {
 				if cache[key{t.Name, w.Name}] == 0 {
-					n.Source = t.Name
+					n.Source = t.Name + " " + config.Interval
 					notifications <- n
 				}
 
@@ -403,8 +412,6 @@ func main() {
 		select {
 		case n := <-notifications:
 			go sendNotification(n)
-
-			fmt.Printf("Notification: %v\n", n)
 		case r := <-results:
 			if config.Verbose {
 				fmt.Printf("Results: %v\n", r)
