@@ -36,6 +36,8 @@ type tradingpair struct {
 	Coin       string      `json:"coin"`
 	Currency   string      `json:"currency"`
 	Exchange   string      `json:"exchange"`
+	Interval   string      `json:"interval"`
+	Length     int         `json:"length"`
 	Indicators []indicator `json:"indicators"`
 	Watchers   []watcher   `json:"watchers"`
 }
@@ -70,8 +72,6 @@ var config struct {
 	Tradingpairs []tradingpair `json:"tradingpairs"`
 	Watchers     []watcher     `json:"watchers"`
 	Notifiers    []notifier    `json:"notifiers"`
-	Interval     string        `json:"interval"`
-	Length       int           `json:"length"`
 	Verbose      bool          `json:"verbose"`
 }
 
@@ -258,15 +258,15 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localState.init()
 		defer localState.close()
 
-		Interval := ti.Parse(config.Interval).MinHourDay()
+		Interval := ti.Parse(t.Interval).MinHourDay()
 
 		switch Interval.Unit {
 		case ti.Minute:
-			data = cc.Histominute(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
+			data = cc.Histominute(t.Coin, t.Currency, Interval.Num, t.Length, t.Exchange).Data
 		case ti.Hour:
-			data = cc.Histohour(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
+			data = cc.Histohour(t.Coin, t.Currency, Interval.Num, t.Length, t.Exchange).Data
 		case ti.Day:
-			data = cc.Histoday(t.Coin, t.Currency, Interval.Num, config.Length, t.Exchange).Data
+			data = cc.Histoday(t.Coin, t.Currency, Interval.Num, t.Length, t.Exchange).Data
 		}
 
 		open := cc.Open(data)
@@ -289,11 +289,11 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 		globalState.setAll(t.Name+"_coin", t.Coin)
 		globalState.setAll(t.Name+"_currency", t.Currency)
-		globalState.setAll("length", config.Length)
+		globalState.setAll("length", t.Length)
 
 		localState.setAll("coin", t.Coin)
 		localState.setAll("currency", t.Currency)
-		localState.setAll("length", config.Length)
+		localState.setAll("length", t.Length)
 
 		globalState.setExpr(t.Name+"_open", rOpen[0])
 		globalState.setExpr(t.Name+"_high", rHigh[0])
@@ -344,7 +344,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 			if fired {
 				if cache[key{t.Name, w.Name}] == 0 {
-					n.Source = t.Name + " " + config.Interval
+					n.Source = t.Name + " " + t.Interval
 					notifications <- n
 				}
 
