@@ -28,7 +28,8 @@ type indicator struct {
 type watcher struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
-	Code string `json:"code"`
+	Lua  string `json:"lua"`
+	Expr string `json:"expr"`
 }
 
 type tradingpair struct {
@@ -161,15 +162,13 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 	var n notification
 	n.Timestamp = time.Now().Format(time.RFC850)
 	n.Message = watcher.Name
-	n.Code = watcher.Code
 
 	luaResult := false
 
-	switch watcher.Type {
-	case "lua":
+	if watcher.Lua != "" {
 		state.setLua("alert", func(v bool) { luaResult = v })
 
-		err := state.lua.DoString(watcher.Code)
+		err := state.lua.DoString(watcher.Lua)
 
 		if err != nil {
 			log.Fatal(err)
@@ -177,10 +176,12 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 
 		if luaResult {
 			fired = true
+			n.Code = watcher.Lua
+
 			luaResult = false
 		}
-	case "expr":
-		exp, err := govaluate.NewEvaluableExpression(watcher.Code)
+	} else if watcher.Expr != "" {
+		exp, err := govaluate.NewEvaluableExpression(watcher.Expr)
 		res, err := exp.Evaluate(state.expr)
 
 		if err != nil {
@@ -189,8 +190,8 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 
 		if res == true {
 			fired = true
+			n.Code = watcher.Expr
 		}
-	default:
 	}
 
 	return fired, n
