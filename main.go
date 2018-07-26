@@ -33,6 +33,7 @@ type watcher struct {
 
 type tradingpair struct {
 	Name       string      `json:"name"`
+	Slug       string      `json:"slug"`
 	Coin       string      `json:"coin"`
 	Currency   string      `json:"currency"`
 	Exchange   string      `json:"exchange"`
@@ -287,19 +288,19 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		result["close"] = close
 		result["vol"] = vol
 
-		globalState.setAll(t.Name+"_coin", t.Coin)
-		globalState.setAll(t.Name+"_currency", t.Currency)
+		globalState.setAll(t.Slug+"_coin", t.Coin)
+		globalState.setAll(t.Slug+"_currency", t.Currency)
 		globalState.setAll("length", t.Length)
 
 		localState.setAll("coin", t.Coin)
 		localState.setAll("currency", t.Currency)
 		localState.setAll("length", t.Length)
 
-		globalState.setExpr(t.Name+"_open", rOpen[0])
-		globalState.setExpr(t.Name+"_high", rHigh[0])
-		globalState.setExpr(t.Name+"_low", rLow[0])
-		globalState.setExpr(t.Name+"_close", rClose[0])
-		globalState.setExpr(t.Name+"_vol", rVol[0])
+		globalState.setExpr(t.Slug+"_open", rOpen[0])
+		globalState.setExpr(t.Slug+"_high", rHigh[0])
+		globalState.setExpr(t.Slug+"_low", rLow[0])
+		globalState.setExpr(t.Slug+"_close", rClose[0])
+		globalState.setExpr(t.Slug+"_vol", rVol[0])
 
 		localState.setExpr("open", rOpen[0])
 		localState.setExpr("high", rHigh[0])
@@ -307,11 +308,11 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localState.setExpr("close", rClose[0])
 		localState.setExpr("vol", rVol[0])
 
-		globalState.setLua(t.Name+"_open", rOpen)
-		globalState.setLua(t.Name+"_high", rHigh)
-		globalState.setLua(t.Name+"_low", rLow)
-		globalState.setLua(t.Name+"_close", rClose)
-		globalState.setLua(t.Name+"_vol", rVol)
+		globalState.setLua(t.Slug+"_open", rOpen)
+		globalState.setLua(t.Slug+"_high", rHigh)
+		globalState.setLua(t.Slug+"_low", rLow)
+		globalState.setLua(t.Slug+"_close", rClose)
+		globalState.setLua(t.Slug+"_vol", rVol)
 
 		localState.setLua("open", rOpen)
 		localState.setLua("high", rHigh)
@@ -327,8 +328,8 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			output := processIndicators(ohlcv, idc)
 			rOutput := reverse(output)
 
-			globalState.setExpr(t.Name+"_"+idc.Name, rOutput[0])
-			globalState.setLua(t.Name+"_"+idc.Name, rOutput)
+			globalState.setExpr(t.Slug+"_"+idc.Name, rOutput[0])
+			globalState.setLua(t.Slug+"_"+idc.Name, rOutput)
 
 			localState.setExpr(idc.Name, rOutput[0])
 			localState.setLua(idc.Name, rOutput)
@@ -343,14 +344,14 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			fired, n := executeWatcher(localState, w)
 
 			if fired {
-				if cache[key{t.Name, w.Name}] == 0 {
+				if cache[key{t.Slug, w.Name}] == 0 {
 					n.Source = t.Name + " " + t.Interval
 					notifications <- n
 				}
 
-				cache[key{t.Name, w.Name}]++
+				cache[key{t.Slug, w.Name}]++
 			} else {
-				cache[key{t.Name, w.Name}] = 0
+				cache[key{t.Slug, w.Name}] = 0
 			}
 		}
 	}
