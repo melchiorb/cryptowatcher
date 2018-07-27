@@ -29,7 +29,6 @@ type indicator struct {
 
 type watcher struct {
 	Name string `json:"name" yaml:"name"`
-	Type string `json:"type" yaml:"type"`
 	Lua  string `json:"lua" yaml:"lua"`
 	Expr string `json:"expr" yaml:"expr"`
 }
@@ -146,7 +145,7 @@ func sendNotification(n notification) {
 		case "telegram":
 			notifyTelegram(n, notif)
 		default:
-			fmt.Println(n.format("short"))
+			fmt.Printf("%v\n", n)
 		}
 	}
 }
@@ -171,9 +170,8 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 	n.Timestamp = time.Now().Format(time.RFC850)
 	n.Message = watcher.Name
 
-	luaResult := false
-
 	if watcher.Lua != "" {
+		luaResult := false
 		state.setLua("alert", func(v bool) { luaResult = v })
 
 		err := state.lua.DoString(watcher.Lua)
@@ -185,8 +183,6 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 		if luaResult {
 			fired = true
 			n.Code = watcher.Lua
-
-			luaResult = false
 		}
 	} else if watcher.Expr != "" {
 		exp, err := govaluate.NewEvaluableExpression(watcher.Expr)
@@ -375,7 +371,6 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 func loadConfig(file string) {
 	configFile, err := os.Open(file)
 	defer configFile.Close()
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -398,7 +393,7 @@ func main() {
 	if len(os.Args) >= 2 {
 		loadConfig(os.Args[1])
 	} else {
-		loadConfig("config.json")
+		loadConfig("config.yaml")
 	}
 
 	cache = make(map[key]uint64)
