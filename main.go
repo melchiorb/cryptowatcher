@@ -117,6 +117,11 @@ func (state *scriptState) setAll(name string, value interface{}) {
 	state.setLua(name, value)
 }
 
+func (state *scriptState) setBoth(name string, exprVal interface{}, luaVal interface{}) {
+	state.setExpr(name, exprVal)
+	state.setLua(name, luaVal)
+}
+
 func (n notification) format(template string) string {
 	messages := map[string]string{
 		"short":  "{message}",
@@ -294,35 +299,25 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 		globalState.setAll(t.Slug+"_coin", t.Coin)
 		globalState.setAll(t.Slug+"_currency", t.Currency)
-		globalState.setAll("length", t.Length)
+		globalState.setAll(t.Slug+"_interval", t.Interval)
+		globalState.setAll(t.Slug+"_length", t.Length)
+
+		globalState.setBoth(t.Slug+"_open", rOpen[0], rOpen)
+		globalState.setBoth(t.Slug+"_high", rHigh[0], rHigh)
+		globalState.setBoth(t.Slug+"_low", rLow[0], rLow)
+		globalState.setBoth(t.Slug+"_close", rClose[0], rClose)
+		globalState.setBoth(t.Slug+"_vol", rVol[0], rVol)
 
 		localState.setAll("coin", t.Coin)
 		localState.setAll("currency", t.Currency)
+		localState.setAll("interval", t.Interval)
 		localState.setAll("length", t.Length)
 
-		globalState.setExpr(t.Slug+"_open", rOpen[0])
-		globalState.setExpr(t.Slug+"_high", rHigh[0])
-		globalState.setExpr(t.Slug+"_low", rLow[0])
-		globalState.setExpr(t.Slug+"_close", rClose[0])
-		globalState.setExpr(t.Slug+"_vol", rVol[0])
-
-		localState.setExpr("open", rOpen[0])
-		localState.setExpr("high", rHigh[0])
-		localState.setExpr("low", rLow[0])
-		localState.setExpr("close", rClose[0])
-		localState.setExpr("vol", rVol[0])
-
-		globalState.setLua(t.Slug+"_open", rOpen)
-		globalState.setLua(t.Slug+"_high", rHigh)
-		globalState.setLua(t.Slug+"_low", rLow)
-		globalState.setLua(t.Slug+"_close", rClose)
-		globalState.setLua(t.Slug+"_vol", rVol)
-
-		localState.setLua("open", rOpen)
-		localState.setLua("high", rHigh)
-		localState.setLua("low", rLow)
-		localState.setLua("close", rClose)
-		localState.setLua("vol", rVol)
+		localState.setBoth("open", rOpen[0], rOpen)
+		localState.setBoth("high", rHigh[0], rHigh)
+		localState.setBoth("low", rLow[0], rLow)
+		localState.setBoth("close", rClose[0], rClose)
+		localState.setBoth("vol", rVol[0], rVol)
 
 		for j := range t.Indicators {
 			idc := t.Indicators[j]
