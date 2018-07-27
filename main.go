@@ -28,9 +28,10 @@ type indicator struct {
 }
 
 type watcher struct {
-	Name string `json:"name" yaml:"name"`
-	Lua  string `json:"lua" yaml:"lua"`
-	Expr string `json:"expr" yaml:"expr"`
+	Name   string   `json:"name" yaml:"name"`
+	Lua    string   `json:"lua" yaml:"lua"`
+	Expr   string   `json:"expr" yaml:"expr"`
+	Values []string `json:"values" yaml:"values"`
 }
 
 type tradingpair struct {
@@ -54,10 +55,11 @@ type notifier struct {
 }
 
 type notification struct {
-	Timestamp string `json:"timestamp" yaml:"timestamp"`
-	Message   string `json:"message" yaml:"message"`
-	Source    string `json:"source" yaml:"source"`
-	Code      string `json:"code" yaml:"code"`
+	Timestamp string             `json:"timestamp" yaml:"timestamp"`
+	Message   string             `json:"message" yaml:"message"`
+	Source    string             `json:"source" yaml:"source"`
+	Code      string             `json:"code" yaml:"code"`
+	Values    map[string]float64 `json:"values" yaml:"values"`
 }
 
 type timeseries = []float64
@@ -122,17 +124,40 @@ func (state *scriptState) setBoth(name string, exprVal interface{}, luaVal inter
 }
 
 func (n notification) format(template string) string {
-	messages := map[string]string{
-		"short":  "{message}",
-		"normal": "{source}\n{message}",
-		"long":   "{source}\n{message}\n{code}",
+	message, values := "", ""
+
+	for k, v := range n.Values {
+		if v < 1 {
+			// 0 digits
+			values += fmt.Sprintf("%-12s: %-8.6f\n", strings.Title(k), v)
+		} else if v < 1000 {
+			// three digits
+			values += fmt.Sprintf("%-12s: %-8.2f\n", strings.Title(k), v)
+		} else {
+			// four digits
+			values += fmt.Sprintf("%-12s: %-8.0f\n", strings.Title(k), v)
+		}
 	}
 
-	message := messages[template]
+	if n.Source != "" {
+		message += n.Source + "\n"
+	}
 
-	message = strings.Replace(message, "{source}", n.Source, -1)
-	message = strings.Replace(message, "{message}", n.Message, -1)
-	message = strings.Replace(message, "{code}", n.Code, -1)
+	message += n.Message + "\n"
+
+	switch template {
+	case "normal":
+		if values != "" {
+			message += "\n" + values
+		}
+	case "long":
+		if values != "" {
+			message += "\n" + values
+		}
+
+		message += "\n" + n.Code
+	default:
+	}
 
 	return message
 }
@@ -145,7 +170,7 @@ func sendNotification(n notification) {
 		case "telegram":
 			notifyTelegram(n, notif)
 		default:
-			fmt.Printf("%v\n", n)
+			fmt.Printf("%v---\n", n.format("normal"))
 		}
 	}
 }
@@ -249,6 +274,8 @@ func processIndicators(src ohlcv5, idc indicator) timeseries {
 }
 
 func mainLoop(notifications chan<- notification, results chan<- dataset) {
+	globalResults := make(dataset)
+
 	var globalState scriptState
 	globalState.init()
 	defer globalState.close()
@@ -256,7 +283,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 	for i := range config.Tradingpairs {
 		t := config.Tradingpairs[i]
 
-		result := make(dataset)
+		localResults := make(dataset)
 
 		var data []cc.Tick
 
@@ -287,11 +314,17 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		rClose := reverse(close)
 		rVol := reverse(vol)
 
-		result["open"] = open
-		result["high"] = high
-		result["low"] = low
-		result["close"] = close
-		result["vol"] = vol
+		globalResults[t.Slug+"_open"] = open
+		globalResults[t.Slug+"_high"] = high
+		globalResults[t.Slug+"_low"] = low
+		globalResults[t.Slug+"_close"] = close
+		globalResults[t.Slug+"_vol"] = vol
+
+		localResults["open"] = open
+		localResults["high"] = high
+		localResults["low"] = low
+		localResults["close"] = close
+		localResults["vol"] = vol
 
 		globalState.setAll(t.Slug+"_coin", t.Coin)
 		globalState.setAll(t.Slug+"_currency", t.Currency)
@@ -329,10 +362,9 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			localState.setExpr(idc.Name, rOutput[0])
 			localState.setLua(idc.Name, rOutput)
 
-			result[idc.Name] = output
+			globalResults[t.Slug+"_"+idc.Name] = output
+			localResults[idc.Name] = output
 		}
-
-		results <- result
 
 		for j := range t.Watchers {
 			w := t.Watchers[j]
@@ -341,6 +373,14 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			if fired {
 				if cache[key{t.Slug, w.Name}] == 0 {
 					n.Source = t.Name + " " + t.Interval
+					n.Values = make(map[string]float64)
+
+					for k := range w.Values {
+						key := w.Values[k]
+						results := localResults[key]
+						n.Values[key] = results[len(results)-1]
+					}
+
 					notifications <- n
 				}
 
@@ -358,6 +398,14 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 
 		if fired {
 			if cache[key{"global", w.Name}] == 0 {
+				n.Values = make(map[string]float64)
+
+				for k := range w.Values {
+					key := w.Values[k]
+					results := globalResults[key]
+					n.Values[key] = results[len(results)-1]
+				}
+
 				notifications <- n
 			}
 
