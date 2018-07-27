@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	cc "./cryptocompare"
 	ti "./tradeinterval"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/Knetic/govaluate"
 	talib "github.com/markcheno/go-talib"
@@ -20,43 +22,43 @@ import (
 )
 
 type indicator struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Params []int  `json:"params"`
+	Name   string `json:"name" yaml:"name"`
+	Type   string `json:"type" yaml:"type"`
+	Params []int  `json:"params" yaml:"params"`
 }
 
 type watcher struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Lua  string `json:"lua"`
-	Expr string `json:"expr"`
+	Name string `json:"name" yaml:"name"`
+	Type string `json:"type" yaml:"type"`
+	Lua  string `json:"lua" yaml:"lua"`
+	Expr string `json:"expr" yaml:"expr"`
 }
 
 type tradingpair struct {
-	Name       string      `json:"name"`
-	Slug       string      `json:"slug"`
-	Coin       string      `json:"coin"`
-	Currency   string      `json:"currency"`
-	Exchange   string      `json:"exchange"`
-	Interval   string      `json:"interval"`
-	Length     int         `json:"length"`
-	Indicators []indicator `json:"indicators"`
-	Watchers   []watcher   `json:"watchers"`
+	Name       string      `json:"name" yaml:"name"`
+	Slug       string      `json:"slug" yaml:"slug"`
+	Coin       string      `json:"coin" yaml:"coin"`
+	Currency   string      `json:"currency" yaml:"currency"`
+	Exchange   string      `json:"exchange" yaml:"exchange"`
+	Interval   string      `json:"interval" yaml:"interval"`
+	Length     int         `json:"length" yaml:"length"`
+	Indicators []indicator `json:"indicators" yaml:"indicators"`
+	Watchers   []watcher   `json:"watchers" yaml:"watchers"`
 }
 
 type notifier struct {
-	Type      string `json:"type"`
-	Recipient string `json:"recipient"`
-	Sender    string `json:"sender"`
-	Auth      string `json:"auth"`
-	Format    string `json:"format"`
+	Type      string `json:"type" yaml:"type"`
+	Recipient string `json:"recipient" yaml:"recipient"`
+	Sender    string `json:"sender" yaml:"sender"`
+	Auth      string `json:"auth" yaml:"auth"`
+	Format    string `json:"format" yaml:"format"`
 }
 
 type notification struct {
-	Timestamp string `json:"timestamp"`
-	Message   string `json:"message"`
-	Source    string `json:"source"`
-	Code      string `json:"code"`
+	Timestamp string `json:"timestamp" yaml:"timestamp"`
+	Message   string `json:"message" yaml:"message"`
+	Source    string `json:"source" yaml:"source"`
+	Code      string `json:"code" yaml:"code"`
 }
 
 type timeseries = []float64
@@ -71,11 +73,11 @@ type key struct {
 var cache map[key]uint64
 
 var config struct {
-	Tradingpairs []tradingpair `json:"tradingpairs"`
-	Watchers     []watcher     `json:"watchers"`
-	Notifiers    []notifier    `json:"notifiers"`
-	Update       string        `json:"update"`
-	Verbose      bool          `json:"verbose"`
+	Tradingpairs []tradingpair `json:"tradingpairs" yaml:"tradingpairs"`
+	Watchers     []watcher     `json:"watchers" yaml:"watchers"`
+	Notifiers    []notifier    `json:"notifiers" yaml:"notifiers"`
+	Update       string        `json:"update" yaml:"update"`
+	Verbose      bool          `json:"verbose" yaml:"verbose"`
 }
 
 func reverse(numbers timeseries) timeseries {
@@ -383,8 +385,15 @@ func loadConfig(file string) {
 		log.Fatal(err)
 	}
 
-	jsonParser := json.NewDecoder(configFile)
-	err = jsonParser.Decode(&config)
+	switch filepath.Ext(file) {
+	case ".json":
+		jsonParser := json.NewDecoder(configFile)
+		err = jsonParser.Decode(&config)
+	case ".yaml", ".yml":
+		yamlParser := yaml.NewDecoder(configFile)
+		err = yamlParser.Decode(&config)
+	}
+
 	if err != nil {
 		log.Fatal(err)
 	}
