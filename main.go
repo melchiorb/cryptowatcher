@@ -163,9 +163,7 @@ func (n notification) format(template string) string {
 }
 
 func sendNotification(n notification) {
-	for i := range config.Notifiers {
-		notif := config.Notifiers[i]
-
+	for _, notif := range config.Notifiers {
 		switch notif.Type {
 		case "telegram":
 			notifyTelegram(n, notif)
@@ -280,9 +278,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 	globalState.init()
 	defer globalState.close()
 
-	for i := range config.Tradingpairs {
-		t := config.Tradingpairs[i]
-
+	for _, t := range config.Tradingpairs {
 		localResults := make(dataset)
 
 		var data []cc.Tick
@@ -348,9 +344,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localState.setBoth("close", rClose[0], rClose)
 		localState.setBoth("vol", rVol[0], rVol)
 
-		for j := range t.Indicators {
-			idc := t.Indicators[j]
-
+		for _, idc := range t.Indicators {
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
 			output := processIndicators(ohlcv, idc)
@@ -366,8 +360,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			localResults[idc.Name] = output
 		}
 
-		for j := range t.Watchers {
-			w := t.Watchers[j]
+		for _, w := range t.Watchers {
 			fired, n := executeWatcher(localState, w)
 
 			if fired {
@@ -375,8 +368,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 					n.Source = t.Name + " " + t.Interval
 					n.Values = make(map[string]float64)
 
-					for k := range w.Values {
-						key := w.Values[k]
+					for _, key := range w.Values {
 						results := localResults[key]
 						n.Values[key] = results[len(results)-1]
 					}
@@ -391,17 +383,14 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		}
 	}
 
-	for j := range config.Watchers {
-		w := config.Watchers[j]
-
+	for _, w := range config.Watchers {
 		fired, n := executeWatcher(globalState, w)
 
 		if fired {
 			if cache[key{"global", w.Name}] == 0 {
 				n.Values = make(map[string]float64)
 
-				for k := range w.Values {
-					key := w.Values[k]
+				for _, key := range w.Values {
 					results := globalResults[key]
 					n.Values[key] = results[len(results)-1]
 				}
