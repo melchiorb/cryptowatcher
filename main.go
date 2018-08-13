@@ -12,13 +12,11 @@ import (
 	"time"
 
 	cc "./cryptocompare"
+	ss "./scriptstate"
 	ti "./tradeinterval"
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/Knetic/govaluate"
 	talib "github.com/markcheno/go-talib"
-	lua "github.com/yuin/gopher-lua"
-	luar "layeh.com/gopher-luar"
 )
 
 type indicator struct {
@@ -89,40 +87,6 @@ func reverse(numbers timeseries) timeseries {
 	return newNumbers
 }
 
-type exprState map[string]interface{}
-
-type scriptState struct {
-	expr exprState
-	lua  *lua.LState
-}
-
-func (state *scriptState) init() {
-	state.expr = make(exprState, 64)
-	state.lua = lua.NewState()
-}
-
-func (state *scriptState) close() {
-	state.lua.Close()
-}
-
-func (state *scriptState) setLua(name string, value interface{}) {
-	state.lua.SetGlobal(name, luar.New(state.lua, value))
-}
-
-func (state *scriptState) setExpr(name string, value interface{}) {
-	state.expr[name] = value
-}
-
-func (state *scriptState) setAll(name string, value interface{}) {
-	state.setExpr(name, value)
-	state.setLua(name, value)
-}
-
-func (state *scriptState) setBoth(name string, exprVal interface{}, luaVal interface{}) {
-	state.setExpr(name, exprVal)
-	state.setLua(name, luaVal)
-}
-
 func (n notification) format(template string) string {
 	message, values := "", ""
 
@@ -186,7 +150,7 @@ func notifyTelegram(n notification, notif notifier) {
 	_, _ = http.Get(link)
 }
 
-func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
+func executeWatcher(state ss.State, watcher watcher) (bool, notification) {
 	fired := false
 
 	var n notification
@@ -195,9 +159,9 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 
 	if watcher.Lua != "" {
 		luaResult := false
-		state.setLua("alert", func(v bool) { luaResult = v })
+		state.SetLua("alert", func(v bool) { luaResult = v })
 
-		err := state.lua.DoString(watcher.Lua)
+		err := state.EvalLua(watcher.Lua)
 
 		if err != nil {
 			log.Fatal(err)
@@ -208,8 +172,7 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 			n.Code = watcher.Lua
 		}
 	} else if watcher.Expr != "" {
-		exp, err := govaluate.NewEvaluableExpression(watcher.Expr)
-		res, err := exp.Evaluate(state.expr)
+		res, err := state.EvalExpr(watcher.Expr)
 
 		if err != nil {
 			log.Fatal(err)
@@ -303,18 +266,18 @@ func processIndicators(src ohlcv5, idc indicator) ([]timeseries, []string) {
 func mainLoop(notifications chan<- notification, results chan<- dataset) {
 	globalResults := make(dataset)
 
-	var globalState scriptState
-	globalState.init()
-	defer globalState.close()
+	var globalState ss.State
+	globalState.Init()
+	defer globalState.Close()
 
 	for _, t := range config.Tradingpairs {
 		localResults := make(dataset)
 
 		var data []cc.Tick
 
-		var localState scriptState
-		localState.init()
-		defer localState.close()
+		var localState ss.State
+		localState.Init()
+		defer localState.Close()
 
 		Interval := ti.Parse(t.Interval).MinHourDay()
 
@@ -351,27 +314,27 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localResults["close"] = close
 		localResults["vol"] = vol
 
-		globalState.setAll(t.Slug+"_coin", t.Coin)
-		globalState.setAll(t.Slug+"_currency", t.Currency)
-		globalState.setAll(t.Slug+"_interval", t.Interval)
-		globalState.setAll(t.Slug+"_length", t.Length)
+		globalState.SetAll(t.Slug+"_coin", t.Coin)
+		globalState.SetAll(t.Slug+"_currency", t.Currency)
+		globalState.SetAll(t.Slug+"_interval", t.Interval)
+		globalState.SetAll(t.Slug+"_length", t.Length)
 
-		globalState.setBoth(t.Slug+"_open", rOpen[0], rOpen)
-		globalState.setBoth(t.Slug+"_high", rHigh[0], rHigh)
-		globalState.setBoth(t.Slug+"_low", rLow[0], rLow)
-		globalState.setBoth(t.Slug+"_close", rClose[0], rClose)
-		globalState.setBoth(t.Slug+"_vol", rVol[0], rVol)
+		globalState.SetBoth(t.Slug+"_open", rOpen[0], rOpen)
+		globalState.SetBoth(t.Slug+"_high", rHigh[0], rHigh)
+		globalState.SetBoth(t.Slug+"_low", rLow[0], rLow)
+		globalState.SetBoth(t.Slug+"_close", rClose[0], rClose)
+		globalState.SetBoth(t.Slug+"_vol", rVol[0], rVol)
 
-		localState.setAll("coin", t.Coin)
-		localState.setAll("currency", t.Currency)
-		localState.setAll("interval", t.Interval)
-		localState.setAll("length", t.Length)
+		localState.SetAll("coin", t.Coin)
+		localState.SetAll("currency", t.Currency)
+		localState.SetAll("interval", t.Interval)
+		localState.SetAll("length", t.Length)
 
-		localState.setBoth("open", rOpen[0], rOpen)
-		localState.setBoth("high", rHigh[0], rHigh)
-		localState.setBoth("low", rLow[0], rLow)
-		localState.setBoth("close", rClose[0], rClose)
-		localState.setBoth("vol", rVol[0], rVol)
+		localState.SetBoth("open", rOpen[0], rOpen)
+		localState.SetBoth("high", rHigh[0], rHigh)
+		localState.SetBoth("low", rLow[0], rLow)
+		localState.SetBoth("close", rClose[0], rClose)
+		localState.SetBoth("vol", rVol[0], rVol)
 
 		for _, idc := range t.Indicators {
 			ohlcv := ohlcv5{open, high, low, close, vol}
@@ -382,11 +345,11 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 				rOutput := reverse(output)
 				label := labels[i]
 
-				globalState.setExpr(t.Slug+"_"+idc.Name+label, rOutput[0])
-				globalState.setLua(t.Slug+"_"+idc.Name+label, rOutput)
+				globalState.SetExpr(t.Slug+"_"+idc.Name+label, rOutput[0])
+				globalState.SetLua(t.Slug+"_"+idc.Name+label, rOutput)
 
-				localState.setExpr(idc.Name+label, rOutput[0])
-				localState.setLua(idc.Name+label, rOutput)
+				localState.SetExpr(idc.Name+label, rOutput[0])
+				localState.SetLua(idc.Name+label, rOutput)
 
 				globalResults[t.Slug+"_"+idc.Name+label] = output
 				localResults[idc.Name+label] = output
