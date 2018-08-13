@@ -264,23 +264,30 @@ func processIndicators(src ohlcv5, idc indicator) ([]timeseries, []string) {
 }
 
 func mainLoop(notifications chan<- notification, results chan<- dataset) {
+	// global results
 	globalResults := make(dataset)
 
+	// global script state
 	var globalState ss.State
 	globalState.Init()
 	defer globalState.Close()
 
 	for _, t := range config.Tradingpairs {
+		// local results
 		localResults := make(dataset)
 
+		// time series data
 		var data []cc.Tick
 
+		// local script state
 		var localState ss.State
 		localState.Init()
 		defer localState.Close()
 
+		// calculate time frame
 		Interval := ti.Parse(t.Interval).MinHourDay()
 
+		// load time series data
 		switch Interval.Unit {
 		case ti.Minute:
 			data = cc.Histominute(t.Coin, t.Currency, Interval.Num, t.Length, t.Exchange).Data
@@ -290,30 +297,35 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			data = cc.Histoday(t.Coin, t.Currency, Interval.Num, t.Length, t.Exchange).Data
 		}
 
+		// get time series data
 		open := cc.Open(data)
 		high := cc.High(data)
 		low := cc.Low(data)
 		close := cc.Close(data)
 		vol := cc.VolumeFrom(data)
 
+		// reverse time series data for scripts
 		rOpen := reverse(open)
 		rHigh := reverse(high)
 		rLow := reverse(low)
 		rClose := reverse(close)
 		rVol := reverse(vol)
 
+		// set global result data
 		globalResults[t.Slug+"_open"] = open
 		globalResults[t.Slug+"_high"] = high
 		globalResults[t.Slug+"_low"] = low
 		globalResults[t.Slug+"_close"] = close
 		globalResults[t.Slug+"_vol"] = vol
 
+		// set local result data
 		localResults["open"] = open
 		localResults["high"] = high
 		localResults["low"] = low
 		localResults["close"] = close
 		localResults["vol"] = vol
 
+		// set global state
 		globalState.SetAll(t.Slug+"_coin", t.Coin)
 		globalState.SetAll(t.Slug+"_currency", t.Currency)
 		globalState.SetAll(t.Slug+"_interval", t.Interval)
@@ -325,6 +337,7 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		globalState.SetBoth(t.Slug+"_close", rClose[0], rClose)
 		globalState.SetBoth(t.Slug+"_vol", rVol[0], rVol)
 
+		// set local state
 		localState.SetAll("coin", t.Coin)
 		localState.SetAll("currency", t.Currency)
 		localState.SetAll("interval", t.Interval)
@@ -336,15 +349,19 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		localState.SetBoth("close", rClose[0], rClose)
 		localState.SetBoth("vol", rVol[0], rVol)
 
+		// process indicators
 		for _, idc := range t.Indicators {
+			// create input data
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
 			outputs, labels := processIndicators(ohlcv, idc)
 
+			// process indicator
 			for i, output := range outputs {
 				rOutput := reverse(output)
 				label := labels[i]
 
+				// add indicator output to state
 				globalState.SetExpr(t.Slug+"_"+idc.Name+label, rOutput[0])
 				globalState.SetLua(t.Slug+"_"+idc.Name+label, rOutput)
 
@@ -356,11 +373,16 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 			}
 		}
 
+		// execute time series watchers
 		for _, w := range t.Watchers {
+			// execute watcher
 			fired, n := executeWatcher(localState, w)
 
+			// process watcher result
 			if fired {
+				// check for previous notification
 				if cache[key{t.Slug, w.Name}] == 0 {
+					// set return values
 					n.Source = t.Name + " " + t.Interval
 					n.Values = make(map[string]float64)
 
@@ -369,21 +391,29 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 						n.Values[key] = results[len(results)-1]
 					}
 
+					// send notification
 					notifications <- n
 				}
 
+				// increase notification counter
 				cache[key{t.Slug, w.Name}]++
 			} else {
+				// reset cache
 				cache[key{t.Slug, w.Name}] = 0
 			}
 		}
 	}
 
+	// execute global watchers
 	for _, w := range config.Watchers {
+		// execure watcher
 		fired, n := executeWatcher(globalState, w)
 
+		// process watcher result
 		if fired {
+			// check for previous notification
 			if cache[key{"global", w.Name}] == 0 {
+				// set return values
 				n.Values = make(map[string]float64)
 
 				for _, key := range w.Values {
@@ -391,11 +421,14 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 					n.Values[key] = results[len(results)-1]
 				}
 
+				// send notification
 				notifications <- n
 			}
 
+			// increase notification counter
 			cache[key{"global", w.Name}]++
 		} else {
+			// reset cache
 			cache[key{"global", w.Name}] = 0
 		}
 	}
@@ -423,26 +456,32 @@ func loadConfig(file string) {
 }
 
 func main() {
+	// load config from argument or default
 	if len(os.Args) >= 2 {
 		loadConfig(os.Args[1])
 	} else {
 		loadConfig("config.yaml")
 	}
 
+	// notification cache
 	cache = make(map[key]uint64)
 
+	// notification and result channels
 	notifications := make(chan notification)
 	results := make(chan dataset)
 
+	// update interval
 	update, err := time.ParseDuration(config.Update)
 
 	if err != nil {
 		update = time.Hour
 	}
 
+	// main loop ticker
 	ticker := time.NewTicker(update)
 	defer ticker.Stop()
 
+	// main loop
 	go func() {
 		mainLoop(notifications, results)
 
@@ -451,6 +490,7 @@ func main() {
 		}
 	}()
 
+	// process notifictions and results
 	for {
 		select {
 		case n := <-notifications:
