@@ -224,51 +224,80 @@ func executeWatcher(state scriptState, watcher watcher) (bool, notification) {
 	return fired, n
 }
 
-func processIndicators(src ohlcv5, idc indicator) timeseries {
-	var result timeseries
+func processIndicators(src ohlcv5, idc indicator) ([]timeseries, []string) {
+	var result []timeseries
+	var labels []string
 
 	switch idc.Type {
 	case "sma":
-		result = talib.Sma(src[3], idc.Params[0])
+		r1 := talib.Sma(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "ema":
-		result = talib.Ema(src[3], idc.Params[0])
+		r1 := talib.Ema(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "dema":
-		result = talib.Dema(src[3], idc.Params[0])
+		r1 := talib.Dema(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "tema":
-		result = talib.Tema(src[3], idc.Params[0])
+		r1 := talib.Tema(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "wma":
-		result = talib.Wma(src[3], idc.Params[0])
+		r1 := talib.Wma(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "rsi":
-		result = talib.Rsi(src[3], idc.Params[0])
+		r1 := talib.Rsi(src[3], idc.Params[0])
+		result = append(result, r1)
+		labels = append(labels, "")
 	case "stochrsi":
-		_, result = talib.StochRsi(src[3], idc.Params[0], idc.Params[1], idc.Params[2], talib.SMA)
+		r1, r2 := talib.StochRsi(src[3], idc.Params[0], idc.Params[1], idc.Params[2], talib.SMA)
+		result = append(result, r1, r2)
+		labels = append(labels, "_K", "_D")
 	case "stoch":
-		_, result = talib.Stoch(src[1], src[2], src[3], idc.Params[0], idc.Params[1], talib.SMA, idc.Params[2], talib.SMA)
+		r1, r2 := talib.Stoch(src[1], src[2], src[3], idc.Params[0], idc.Params[1], talib.SMA, idc.Params[2], talib.SMA)
+		result = append(result, r1, r2)
+		labels = append(labels, "_K", "_D")
 	case "macd":
-		_, _, result = talib.Macd(src[3], idc.Params[0], idc.Params[1], idc.Params[2])
+		r1, r2, r3 := talib.Macd(src[3], idc.Params[0], idc.Params[1], idc.Params[2])
+		result = append(result, r1, r2, r3)
+		labels = append(labels, "", "_Sig", "_Hist")
 	case "mom":
-		result = talib.Mom(src[3], idc.Params[0])
+		r1 := talib.Mom(src[3], idc.Params[0])
+		result = append(result, r1)
 	case "mfi":
-		result = talib.Mfi(src[1], src[2], src[3], src[4], idc.Params[0])
+		r1 := talib.Mfi(src[1], src[2], src[3], src[4], idc.Params[0])
+		result = append(result, r1)
 	case "adx":
-		result = talib.Adx(src[1], src[2], src[3], idc.Params[0])
+		r1 := talib.Adx(src[1], src[2], src[3], idc.Params[0])
+		result = append(result, r1)
 	case "roc":
-		result = talib.Roc(src[3], idc.Params[0])
+		r1 := talib.Roc(src[3], idc.Params[0])
+		result = append(result, r1)
 	case "obv":
-		result = talib.Obv(src[3], src[4])
+		r1 := talib.Obv(src[3], src[4])
+		result = append(result, r1)
 	case "atr":
-		result = talib.Atr(src[1], src[2], src[3], idc.Params[0])
+		r1 := talib.Atr(src[1], src[2], src[3], idc.Params[0])
+		result = append(result, r1)
 	case "natr":
-		result = talib.Natr(src[1], src[2], src[3], idc.Params[0])
+		r1 := talib.Natr(src[1], src[2], src[3], idc.Params[0])
+		result = append(result, r1)
 	case "linearreg":
-		result = talib.LinearReg(src[3], idc.Params[0])
+		r1 := talib.LinearReg(src[3], idc.Params[0])
+		result = append(result, r1)
 	case "max":
-		result = talib.Max(src[3], idc.Params[0])
+		r1 := talib.Max(src[3], idc.Params[0])
+		result = append(result, r1)
 	case "min":
-		result = talib.Min(src[3], idc.Params[0])
+		r1 := talib.Min(src[3], idc.Params[0])
+		result = append(result, r1)
 	}
 
-	return result
+	return result, labels
 }
 
 func mainLoop(notifications chan<- notification, results chan<- dataset) {
@@ -347,17 +376,21 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 		for _, idc := range t.Indicators {
 			ohlcv := ohlcv5{open, high, low, close, vol}
 
-			output := processIndicators(ohlcv, idc)
-			rOutput := reverse(output)
+			outputs, labels := processIndicators(ohlcv, idc)
 
-			globalState.setExpr(t.Slug+"_"+idc.Name, rOutput[0])
-			globalState.setLua(t.Slug+"_"+idc.Name, rOutput)
+			for i, output := range outputs {
+				rOutput := reverse(output)
+				label := labels[i]
 
-			localState.setExpr(idc.Name, rOutput[0])
-			localState.setLua(idc.Name, rOutput)
+				globalState.setExpr(t.Slug+"_"+idc.Name+label, rOutput[0])
+				globalState.setLua(t.Slug+"_"+idc.Name+label, rOutput)
 
-			globalResults[t.Slug+"_"+idc.Name] = output
-			localResults[idc.Name] = output
+				localState.setExpr(idc.Name+label, rOutput[0])
+				localState.setLua(idc.Name+label, rOutput)
+
+				globalResults[t.Slug+"_"+idc.Name+label] = output
+				localResults[idc.Name+label] = output
+			}
 		}
 
 		for _, w := range t.Watchers {
