@@ -22,13 +22,13 @@ type Tick struct {
 
 // Historical data structure
 type Historical struct {
-	Data              []Tick
-	Response          string
-	Type              int
-	Aggregated        bool
-	TimeTo            int
-	TimeFrom          int
-	FirstValueInArray bool
+	Data              []Tick `json:"Data"`
+	Response          string `json:"Response"`
+	Type              int    `json:"Type"`
+	Aggregated        bool   `json:"Aggregated"`
+	TimeTo            int    `json:"TimeTo"`
+	TimeFrom          int    `json:"TimeFrom"`
+	FirstValueInArray bool   `json:"FirstValueInArray"`
 	ConversionType    struct {
 		Type             string `json:"type"`
 		ConversionSymbol string `json:"conversionSymbol"`
@@ -55,6 +55,16 @@ func query(q string, params []string) []byte {
 	}
 
 	return body
+}
+
+// Time gets the time from Data returned by the API
+func Time(data []Tick) []int {
+	result := []int{}
+	for i := range data {
+		result = append(result, data[i].Time)
+	}
+
+	return result
 }
 
 // Open gets the open price from Data returned by the API
