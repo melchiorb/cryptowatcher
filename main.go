@@ -40,6 +40,7 @@ type tradingpair struct {
 	Exchange   string      `json:"exchange" yaml:"exchange"`
 	Interval   string      `json:"interval" yaml:"interval"`
 	Length     int         `json:"length" yaml:"length"`
+	Update     []string    `json:"update" yaml:"update"`
 	Indicators []indicator `json:"indicators" yaml:"indicators"`
 	Watchers   []watcher   `json:"watchers" yaml:"watchers"`
 }
@@ -372,6 +373,21 @@ func mainLoop(notifications chan<- notification, results chan<- dataset) {
 				localResults[idc.Name+label] = output
 			}
 		}
+
+		// send update
+		var n notification
+		n.Timestamp = time.Now().Format(time.RFC850)
+		n.Message = "Update"
+
+		n.Source = t.Name + " " + t.Interval
+		n.Values = make(map[string]float64)
+
+		for _, key := range t.Update {
+			results := localResults[key]
+			n.Values[key] = results[len(results)-1]
+		}
+
+		notifications <- n
 
 		// execute time series watchers
 		for _, w := range t.Watchers {
